@@ -61,6 +61,7 @@ jobs:
           cd gemini-rtsw-repo
 
           # Copy built RPMs into the rpms/ directory for sync
+          mkdir -p rpms
           cp ../rpms/*.rpm rpms/
 
           # Sync RPMs into the rpm-repo container and push
