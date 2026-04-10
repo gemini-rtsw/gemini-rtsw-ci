@@ -14,6 +14,10 @@ on:
         default: 'gemini-rtsw-ci'
         type: string
 
+permissions:
+  contents: read
+  packages: write
+
 env:
   RPM_REPO_IMAGE: ghcr.io/gemini-rtsw/rpm-repo:latest
 
@@ -56,21 +60,12 @@ jobs:
           git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
 
-          for rpm in ../rpms/*.rpm; do
-            if [ "$rpm" = "$(ls -t ../rpms/*.rpm | head -1)" ]; then
-              if [ "${{ inputs.is_prod }}" = "true" ]; then
-                ./upload_rpm.sh --prod "$rpm"
-              else
-                ./upload_rpm.sh "$rpm"
-              fi
-            else
-              if [ "${{ inputs.is_prod }}" = "true" ]; then
-                ./upload_rpm.sh --prod --no-push "$rpm"
-              else
-                ./upload_rpm.sh --no-push "$rpm"
-              fi
-            fi
-          done
+          # Copy built RPMs into the rpms/ directory for sync
+          cp ../rpms/*.rpm rpms/
+
+          # Sync RPMs into the rpm-repo container and push
+          chmod +x sync_repo.sh
+          ./sync_repo.sh
 
   build-docker:
     name: Build Docker Image
