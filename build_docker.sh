@@ -117,10 +117,14 @@ fi
 
 start_rpm_repo
 
-docker build \
+# Create a buildx builder that supports custom networks
+docker buildx create --name rpm-builder --driver docker-container \
+    --driver-opt network="$RPM_REPO_NETWORK" --use
+
+docker buildx build \
     --build-arg IN_PIPELINE="${IN_PIPELINE}" \
     --build-arg PACKAGE_NAME="${PACKAGE_NAME}" \
-    --network "$RPM_REPO_NETWORK" \
+    --load \
     -f "${SCRIPT_DIR}/Dockerfile" \
     ${TAGS} .
 
