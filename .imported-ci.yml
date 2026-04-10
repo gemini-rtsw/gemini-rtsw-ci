@@ -1,0 +1,126 @@
+variables:
+  GIT_STRATEGY: clone
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  PACKAGE_NAME: ${CI_PROJECT_NAME}
+  # Default repository path
+  REPO_PATH: "rpm-repo/1.0"
+  IS_PROD: "false"
+  # Ensure git depth is sufficient to get commit hash
+  GIT_DEPTH: "50"
+
+services:
+  - docker:dind
+
+.docker-login-and-set-repo: &docker_login_and_set_repo
+  before_script:
+    - docker login -u oauth2 -p ${REGISTRY_TOKEN} ${CI_REGISTRY}
+    - |
+      if [ "${IS_PROD}" = "true" ]; then
+        echo "Using production repository"
+        export REPO_PATH="prod/1.0"
+      else
+        echo "Using default repository"
+        export REPO_PATH="rpm-repo/1.0"
+      fi
+
+build:
+  image: docker:latest
+  stage: build
+  <<: *docker_login_and_set_repo
+  script:
+    # Pull the container
+    #- docker pull registry.gitlab.com/nsf-noirlab/gemini/rtsw/gemini-rtsw-repo/rocky8-packages:latest
+    
+    # Create rpms directory for artifacts
+    - mkdir -p rpms
+    
+    # Debug: Show current directory and contents
+    - pwd
+    - ls -la
+    
+    # Install bash so we can run the script
+    - apk add --no-cache bash git
+    
+    # Initialize submodules if needed
+    - git submodule update --init --recursive || true
+    
+    # Show git hash for debugging
+    - git rev-parse --short HEAD || echo "Failed to get git hash"
+    
+    # Run build_rpm.sh with debugging enabled
+    - chmod +x ${CI_SCRIPTS_DIR}/build_rpm.sh
+    - |
+      if [ "${IS_PROD}" = "true" ]; then
+        bash -x ${CI_SCRIPTS_DIR}/build_rpm.sh --prod
+      else
+        bash -x ${CI_SCRIPTS_DIR}/build_rpm.sh
+      fi
+    
+    # Install required tools
+    - apk add --no-cache curl
+    
+    # Configure git for uploads
+    - git config --global credential.helper store
+    - echo "https://oauth2:${REGISTRY_TOKEN}@gitlab.com" > ~/.git-credentials
+    - git config --global user.email "ci-pipeline@noreply.gitlab.com"
+    - git config --global user.name "GitLab CI"
+    
+    # Clone repo and upload RPMs
+    - git clone https://gitlab.com/nsf-noirlab/gemini/rtsw/gemini-rtsw-repo.git
+    - cd gemini-rtsw-repo
+    - |
+      for rpm in ../rpms/*.rpm; do
+        if [ "$rpm" = "$(ls -t ../rpms/*.rpm | head -1)" ]; then
+          if [ "${IS_PROD}" = "true" ]; then
+            ./upload_rpm.sh --prod "$rpm"
+          else
+            ./upload_rpm.sh "$rpm"
+          fi
+        else
+          if [ "${IS_PROD}" = "true" ]; then
+            ./upload_rpm.sh --prod --no-push "$rpm"
+          else
+            ./upload_rpm.sh --no-push "$rpm"
+          fi
+        fi
+      done
+    - cd ..
+
+    # Upload RPMs to GitLab package registry
+    - |
+      for rpm in rpms/*.rpm; do
+        echo "Uploading $rpm to ${REPO_PATH}..."
+        curl --header "PRIVATE-TOKEN: ${REGISTRY_TOKEN}" \
+          --upload-file "$rpm" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${REPO_PATH}/$(basename $rpm)"
+        echo "Upload complete: $rpm"
+      done
+
+  artifacts:
+    paths:
+      - rpms/*.rpm
+
+docker-build:
+  image: docker:latest
+  stage: deploy
+  needs: ["build"]
+  <<: *docker_login_and_set_repo
+  script:
+    # Install required tools
+    - apk add --no-cache bash git
+    
+    # Initialize submodules if needed
+    - git submodule update --init --recursive || true
+    
+    # Run the docker build script with debug output
+    - chmod +x ${CI_SCRIPTS_DIR}/build_docker.sh
+    - echo "CI_REGISTRY=${CI_REGISTRY}"
+    - echo "CI_REGISTRY_IMAGE=${CI_REGISTRY_IMAGE}"
+    - echo "REGISTRY_TOKEN is $(if [ -n \"${REGISTRY_TOKEN}\" ]; then echo 'set'; else echo 'NOT set'; fi)"
+    - |
+      if [ "${IS_PROD}" = "true" ]; then
+        ${CI_SCRIPTS_DIR}/build_docker.sh --prod
+      else
+        ${CI_SCRIPTS_DIR}/build_docker.sh
+      fi 
