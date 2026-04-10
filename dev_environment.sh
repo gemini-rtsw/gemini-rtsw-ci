@@ -31,7 +31,16 @@ if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
 fi
 
 # Get the full repository path from git remote URL (excluding .git and the domain)
-REPO_PATH=$(git config --get remote.origin.url | sed -E 's#^(https?://gitlab\.com/|git@gitlab\.com:)(.*)\.git$#\2#')
+REMOTE_URL=$(git config --get remote.origin.url)
+
+if echo "$REMOTE_URL" | grep -q "github.com"; then
+    REPO_PATH=$(echo "$REMOTE_URL" | sed -E 's#^(https?://github\.com/|git@github\.com:)(.*)\.git$#\2#')
+    REGISTRY="ghcr.io"
+else
+    REPO_PATH=$(echo "$REMOTE_URL" | sed -E 's#^(https?://gitlab\.com/|git@gitlab\.com:)(.*)\.git$#\2#')
+    REGISTRY=${CI_REGISTRY:-"registry.gitlab.com"}
+fi
+
 REPO_NAME=$(basename ${REPO_PATH})
 
 # Convert repository path to lowercase for Docker compatibility
@@ -46,13 +55,12 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
-# Get the GitLab registry URL from the environment or use a default
-GITLAB_REGISTRY=${CI_REGISTRY:-"registry.gitlab.com"}
 # Use the repository's own image with full path - ensure lowercase for Docker
 IMAGE_NAME="${REPO_PATH_LOWERCASE}:${TAG_SUFFIX}"
-FULL_IMAGE_PATH="${GITLAB_REGISTRY}/${IMAGE_NAME}"
+FULL_IMAGE_PATH="${REGISTRY}/${IMAGE_NAME}"
 
 echo "Detected repository path: ${REPO_PATH}"
+echo "Using registry: ${REGISTRY}"
 echo "Using image: ${FULL_IMAGE_PATH}"
 
 # Check for newer image version

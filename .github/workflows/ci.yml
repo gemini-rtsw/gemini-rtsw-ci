@@ -1,0 +1,105 @@
+name: Build RPM and Docker Image
+
+on:
+  workflow_call:
+    inputs:
+      is_prod:
+        description: 'Production build'
+        required: false
+        default: false
+        type: boolean
+      scripts_dir:
+        description: 'Path to gemini-rtsw-ci scripts'
+        required: false
+        default: 'gemini-rtsw-ci'
+        type: string
+
+env:
+  RPM_REPO_IMAGE: ghcr.io/gemini-rtsw/rpm-repo:latest
+
+jobs:
+  build-rpm:
+    name: Build RPM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 50
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build RPM
+        run: |
+          chmod +x ${{ inputs.scripts_dir }}/build_rpm.sh
+          if [ "${{ inputs.is_prod }}" = "true" ]; then
+            ${{ inputs.scripts_dir }}/build_rpm.sh --prod
+          else
+            ${{ inputs.scripts_dir }}/build_rpm.sh
+          fi
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpms
+          path: rpms/*.rpm
+
+      - name: Upload RPMs to rpm-repo
+        run: |
+          # Clone the rpm-repo tools
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
+          cd gemini-rtsw-repo
+
+          for rpm in ../rpms/*.rpm; do
+            if [ "$rpm" = "$(ls -t ../rpms/*.rpm | head -1)" ]; then
+              if [ "${{ inputs.is_prod }}" = "true" ]; then
+                ./upload_rpm.sh --prod "$rpm"
+              else
+                ./upload_rpm.sh "$rpm"
+              fi
+            else
+              if [ "${{ inputs.is_prod }}" = "true" ]; then
+                ./upload_rpm.sh --prod --no-push "$rpm"
+              else
+                ./upload_rpm.sh --no-push "$rpm"
+              fi
+            fi
+          done
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: build-rpm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Download RPM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: rpms
+          path: rpms/
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: |
+          chmod +x ${{ inputs.scripts_dir }}/build_docker.sh
+          if [ "${{ inputs.is_prod }}" = "true" ]; then
+            ${{ inputs.scripts_dir }}/build_docker.sh --prod
+          else
+            ${{ inputs.scripts_dir }}/build_docker.sh
+          fi
