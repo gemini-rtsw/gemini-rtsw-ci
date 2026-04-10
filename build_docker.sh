@@ -8,16 +8,12 @@ RPM_REPO_IMAGE="ghcr.io/gemini-rtsw/rpm-repo:latest"
 RPM_REPO_CONTAINER="rpm-repo"
 RPM_REPO_NETWORK="rpm-net"
 
-# Default repository path
-REPO_PATH="rpm-repo/1.0"
 IS_PROD=false
 
 # Determine script directory for finding Dockerfile
 if [ -n "$CI_SCRIPTS_DIR" ]; then
-    # We're in the pipeline with CI_SCRIPTS_DIR set
     SCRIPT_DIR="$CI_SCRIPTS_DIR"
 else
-    # Local execution - get directory where this script is located
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
@@ -25,7 +21,6 @@ fi
 while [[ $# -gt 0 ]]; do
   case $1 in
     -p|--prod)
-      REPO_PATH="prod/1.0"
       IS_PROD=true
       shift
       ;;
@@ -35,20 +30,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Detect CI environment
+# Detect if we're in a CI pipeline
+IN_PIPELINE="false"
 if [ -n "$GITHUB_ACTIONS" ]; then
-    RPM_REPO_MODE="network"
     IN_PIPELINE="true"
-elif [ -n "$CI_REGISTRY" ]; then
-    RPM_REPO_MODE="gitlab"
-    IN_PIPELINE="true"
-else
-    RPM_REPO_MODE="network"
-    IN_PIPELINE="false"
 fi
-
-echo "RPM repo mode: $RPM_REPO_MODE"
-echo "In pipeline: $IN_PIPELINE"
 
 # --- Helper functions for rpm-repo container ---
 
@@ -75,15 +61,9 @@ start_rpm_repo() {
 }
 
 cleanup_rpm_repo() {
-    if [ "$RPM_REPO_MODE" = "network" ]; then
-        echo "Cleaning up rpm-repo container and network..."
-        docker rm -f "$RPM_REPO_CONTAINER" 2>/dev/null || true
-        docker network rm "$RPM_REPO_NETWORK" 2>/dev/null || true
-    fi
-    # Clean up token file if it exists
-    if [ -n "$TOKEN_FILE" ] && [ -f "$TOKEN_FILE" ]; then
-        rm -f "$TOKEN_FILE" || true
-    fi
+    echo "Cleaning up rpm-repo container and network..."
+    docker rm -f "$RPM_REPO_CONTAINER" 2>/dev/null || true
+    docker network rm "$RPM_REPO_NETWORK" 2>/dev/null || true
 }
 
 trap cleanup_rpm_repo EXIT
@@ -93,20 +73,12 @@ trap cleanup_rpm_repo EXIT
 if [ -n "$GITHUB_ACTIONS" ]; then
     # GitHub Actions: use GHCR
     REGISTRY_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
-elif [ -n "$CI_REGISTRY_IMAGE" ]; then
-    # GitLab CI: already set
-    REGISTRY_IMAGE="$CI_REGISTRY_IMAGE"
 else
     # Local build: auto-detect from git remote
     REMOTE_URL=$(git config --get remote.origin.url)
     if echo "$REMOTE_URL" | grep -q "github.com"; then
-        # GitHub remote -> GHCR
         GITHUB_PATH=$(echo "$REMOTE_URL" | sed -E 's#^(https://github\.com/|git@github\.com:)(.*)\.git$#\2#')
         REGISTRY_IMAGE="ghcr.io/$(echo "$GITHUB_PATH" | tr '[:upper:]' '[:lower:]')"
-    elif echo "$REMOTE_URL" | grep -q "gitlab.com"; then
-        # GitLab remote -> GitLab registry
-        GITLAB_URL=$(echo "$REMOTE_URL" | sed 's/.*gitlab.com[:\/]\(.*\)\.git/\1/')
-        REGISTRY_IMAGE="registry.gitlab.com/${GITLAB_URL}"
     else
         REGISTRY_IMAGE="local/$(basename $(pwd) | tr '[:upper:]' '[:lower:]')"
         echo "Warning: Could not determine registry URL, using default: ${REGISTRY_IMAGE}"
@@ -122,7 +94,7 @@ fi
 echo "PACKAGE_NAME: ${PACKAGE_NAME}"
 echo "REGISTRY_IMAGE: ${REGISTRY_IMAGE}"
 echo "Current directory: $(pwd)"
-echo "Using repository path: $REPO_PATH"
+echo "In pipeline: $IN_PIPELINE"
 
 # Convert to lowercase for Docker compatibility
 REGISTRY_IMAGE=$(echo "$REGISTRY_IMAGE" | tr '[:upper:]' '[:lower:]')
@@ -143,31 +115,14 @@ fi
 
 # --- Build the Docker image ---
 
-if [ "$RPM_REPO_MODE" = "network" ]; then
-    # GitHub / local: use rpm-repo container on Docker network
-    start_rpm_repo
+start_rpm_repo
 
-    docker build \
-        --build-arg IN_PIPELINE="${IN_PIPELINE}" \
-        --build-arg PACKAGE_NAME="${PACKAGE_NAME}" \
-        --build-arg RPM_REPO_METHOD=network \
-        --network "$RPM_REPO_NETWORK" \
-        -f "${SCRIPT_DIR}/Dockerfile" \
-        ${TAGS} .
-else
-    # GitLab: use BuildKit secret for token-based access
-    TOKEN_FILE=$(mktemp)
-    echo "${REGISTRY_TOKEN}" > "${TOKEN_FILE}"
-
-    docker build \
-        --build-arg IN_PIPELINE="${IN_PIPELINE}" \
-        --build-arg PACKAGE_NAME="${PACKAGE_NAME}" \
-        --build-arg REPO_PATH="${REPO_PATH}" \
-        --build-arg RPM_REPO_METHOD=gitlab \
-        --secret id=gitlab_token,src="${TOKEN_FILE}" \
-        -f "${SCRIPT_DIR}/Dockerfile" \
-        ${TAGS} .
-fi
+docker build \
+    --build-arg IN_PIPELINE="${IN_PIPELINE}" \
+    --build-arg PACKAGE_NAME="${PACKAGE_NAME}" \
+    --network "$RPM_REPO_NETWORK" \
+    -f "${SCRIPT_DIR}/Dockerfile" \
+    ${TAGS} .
 
 echo "Docker build completed"
 
@@ -175,18 +130,6 @@ echo "Docker build completed"
 
 if [ -n "$GITHUB_ACTIONS" ]; then
     echo "Running in GitHub Actions, pushing images to GHCR..."
-
-    if [ "$IS_PROD" = true ]; then
-        docker push "${REGISTRY_IMAGE}:prod"
-        docker push "${REGISTRY_IMAGE}:prod-devel"
-    else
-        docker push "${REGISTRY_IMAGE}:latest"
-        docker push "${REGISTRY_IMAGE}:latest-devel"
-    fi
-
-    echo "Successfully pushed all images"
-elif [ -n "$CI_REGISTRY" ]; then
-    echo "Running in GitLab CI pipeline, pushing images..."
 
     if [ "$IS_PROD" = true ]; then
         docker push "${REGISTRY_IMAGE}:prod"

@@ -8,33 +8,6 @@ RPM_REPO_IMAGE="ghcr.io/gemini-rtsw/rpm-repo:latest"
 RPM_REPO_CONTAINER="rpm-repo"
 RPM_REPO_NETWORK="rpm-net"
 
-# Default repository path (used for GitLab mode only)
-REPO_PATH="rpm-repo/1.0"
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    -p|--prod)
-      REPO_PATH="prod/1.0"
-      shift
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-
-# Detect CI environment
-if [ -n "$GITHUB_ACTIONS" ]; then
-    RPM_REPO_MODE="network"
-elif [ -n "$REGISTRY_TOKEN" ] && [ -z "$GITHUB_ACTIONS" ]; then
-    RPM_REPO_MODE="gitlab"
-else
-    RPM_REPO_MODE="network"
-fi
-
-echo "RPM repo mode: $RPM_REPO_MODE"
-
 # --- Helper functions for rpm-repo container ---
 
 start_rpm_repo() {
@@ -60,20 +33,12 @@ start_rpm_repo() {
 }
 
 cleanup_rpm_repo() {
-    if [ "$RPM_REPO_MODE" = "network" ]; then
-        echo "Cleaning up rpm-repo container and network..."
-        docker rm -f "$RPM_REPO_CONTAINER" 2>/dev/null || true
-        docker network rm "$RPM_REPO_NETWORK" 2>/dev/null || true
-    fi
+    echo "Cleaning up rpm-repo container and network..."
+    docker rm -f "$RPM_REPO_CONTAINER" 2>/dev/null || true
+    docker network rm "$RPM_REPO_NETWORK" 2>/dev/null || true
 }
 
 trap cleanup_rpm_repo EXIT
-
-# --- Start rpm-repo if needed ---
-
-if [ "$RPM_REPO_MODE" = "network" ]; then
-    start_rpm_repo
-fi
 
 # Get package name from spec file, checking both root and SPECS directory
 SPEC_FILE=$(ls *.spec 2>/dev/null || ls SPECS/*.spec 2>/dev/null)
@@ -113,38 +78,25 @@ echo "Building package: $PACKAGE_NAME"
 echo "Package version: $PACKAGE_VERSION"
 echo "Using spec file: $SPEC_FILE"
 
-# Pull the container
+# Pull the base image
 echo "Pulling Rocky 9 base image..."
 docker pull rockylinux:9
 
-# Build the repo config and docker run args based on mode
-if [ "$RPM_REPO_MODE" = "network" ]; then
-    echo "Using rpm-repo container for RPM dependencies"
-    REPO_CONFIG='[rpm-repo]
-name=RPM Repository
-baseurl=http://rpm-repo:8080/rpm-repo/
-enabled=1
-gpgcheck=0'
-    NETWORK_ARGS="--network $RPM_REPO_NETWORK"
-else
-    echo "Using GitLab registry for RPM dependencies (repo path: $REPO_PATH)"
-    REPO_CONFIG="[gitlab-rpm-repo]
-name=GitLab RPM Repository
-baseurl=https://oauth2:\${REGISTRY_TOKEN}@gitlab.com/api/v4/projects/66226575/packages/generic/${REPO_PATH}/
-enabled=1
-gpgcheck=0"
-    NETWORK_ARGS=""
-fi
+# Start the rpm-repo container
+start_rpm_repo
 
 # Run the build in container
 echo "Running build in container..."
 docker run --rm -v $(pwd):/work -w /work \
-    -e REGISTRY_TOKEN \
-    ${NETWORK_ARGS} \
+    --network "$RPM_REPO_NETWORK" \
     rockylinux:9 \
     /bin/bash -c 'set -ex && \
         # Configure RPM repository
-        echo "'"$REPO_CONFIG"'" > /etc/yum.repos.d/rpm-repo.repo && \
+        echo "[rpm-repo]
+name=RPM Repository
+baseurl=http://rpm-repo:8080/rpm-repo/
+enabled=1
+gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
 
         # Enable CRB (CodeReady Builder - formerly PowerTools) and EPEL repositories
         dnf install -y epel-release && \

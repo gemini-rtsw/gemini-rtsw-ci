@@ -32,15 +32,7 @@ fi
 
 # Get the full repository path from git remote URL (excluding .git and the domain)
 REMOTE_URL=$(git config --get remote.origin.url)
-
-if echo "$REMOTE_URL" | grep -q "github.com"; then
-    REPO_PATH=$(echo "$REMOTE_URL" | sed -E 's#^(https?://github\.com/|git@github\.com:)(.*)\.git$#\2#')
-    REGISTRY="ghcr.io"
-else
-    REPO_PATH=$(echo "$REMOTE_URL" | sed -E 's#^(https?://gitlab\.com/|git@gitlab\.com:)(.*)\.git$#\2#')
-    REGISTRY=${CI_REGISTRY:-"registry.gitlab.com"}
-fi
-
+REPO_PATH=$(echo "$REMOTE_URL" | sed -E 's#^(https://github\.com/|git@github\.com:)(.*)\.git$#\2#')
 REPO_NAME=$(basename ${REPO_PATH})
 
 # Convert repository path to lowercase for Docker compatibility
@@ -55,12 +47,11 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
-# Use the repository's own image with full path - ensure lowercase for Docker
+# Use GHCR for the container registry
 IMAGE_NAME="${REPO_PATH_LOWERCASE}:${TAG_SUFFIX}"
-FULL_IMAGE_PATH="${REGISTRY}/${IMAGE_NAME}"
+FULL_IMAGE_PATH="ghcr.io/${IMAGE_NAME}"
 
 echo "Detected repository path: ${REPO_PATH}"
-echo "Using registry: ${REGISTRY}"
 echo "Using image: ${FULL_IMAGE_PATH}"
 
 # Check for newer image version
@@ -81,11 +72,11 @@ if [[ "$(uname)" == "Darwin" ]]; then
     echo "Running on macOS - will create /gem_test inside container"
     MOUNT_GEM_TEST=""
     STARTUP_CMD="mkdir -p /gem_test && bash -l"
-    
+
     # X11 forwarding on macOS (requires XQuartz)
     echo "Setting up X11 forwarding for macOS..."
     echo "Note: Make sure XQuartz is installed and running, and that 'Allow connections from network clients' is enabled in XQuartz preferences."
-    
+
     # Check if XQuartz is running
     if pgrep -f "XQuartz" > /dev/null || [[ -S /tmp/.X11-unix/X0 ]]; then
         echo "XQuartz appears to be running."
@@ -107,20 +98,20 @@ else
     fi
     MOUNT_GEM_TEST="-v /gem_test:/gem_test"
     STARTUP_CMD="bash -l"
-    
+
     # X11 forwarding on Linux
     echo "Setting up X11 forwarding for Linux..."
-    
+
     if [[ -n "$DISPLAY" ]]; then
         echo "DISPLAY is set to: $DISPLAY"
         X11_ENV_ARGS="-e DISPLAY=$DISPLAY"
-        
+
         # Mount X11 socket
         if [[ -d "/tmp/.X11-unix" ]]; then
             X11_FORWARDING_ARGS="-v /tmp/.X11-unix:/tmp/.X11-unix:rw"
             echo "X11 socket mounted."
         fi
-        
+
         # Allow container to access X server (add container to xhost)
         echo "Allowing Docker container to access X server..."
         xhost +local:docker 2>/dev/null || echo "Warning: Could not run 'xhost +local:docker'. X11 forwarding may not work."

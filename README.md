@@ -4,11 +4,9 @@
 
 The CI pipeline is used to create two products: an RPM and a Docker image with the build environment installed.
 
-This project supports both **GitHub Actions** and **GitLab CI** pipelines.
-
 These products can be created in two ways:
 
-* Through the CI pipeline initiated by a git push. Both products will be pushed to the container registry after the pipeline completes.
+* Through the GitHub Actions pipeline initiated by a git push. Both products will be pushed to GHCR after the pipeline completes.
 * Locally, using the build\_rpm.sh script to build the RPM, which will be placed in the rpms subdirectory, and build\_docker.sh to build the development environment, which will be added to your local Docker registry.
 
 The development environment can then be used with the dev\_environment.sh script.
@@ -20,20 +18,15 @@ RPMs are served from a Docker container on GHCR: `ghcr.io/gemini-rtsw/rpm-repo:l
 * Runs nginx on port 8080
 * RPMs + repodata accessible at `http://<host>:8080/rpm-repo/`
 * Build scripts automatically start the rpm-repo container on a Docker network
-
-For GitHub builds, no token is needed to access the RPM repo at runtime — the container serves over plain HTTP. A GHCR login is required to **pull** the container image (since it's a private package).
+* No token needed to access RPMs at runtime — the container serves over plain HTTP
+* A GHCR login is required to **pull** the container image (private package)
 
 ## Usage
 
-**Build the products with the pipeline (GitHub)**
+**Build the products with the pipeline**
 
 1. git add and push to your repository
 2. The GitHub Actions workflow will build the RPM and Docker image automatically
-
-**Build the products with the pipeline (GitLab)**
-
-1. git add and push to your repository
-2. The GitLab CI pipeline will build the RPM and Docker image automatically
 
 **Build the products locally**
 
@@ -109,14 +102,14 @@ This script ensures that both RPM and Docker builds have access to the same cust
 ## Pipeline Artifacts
 
 When the pipeline runs successfully:
-* RPMs are saved as pipeline artifacts and can be downloaded from the CI interface
-* Docker images are pushed to the container registry (GHCR for GitHub, GitLab registry for GitLab)
+* RPMs are saved as pipeline artifacts and can be downloaded from the GitHub Actions interface
+* Docker images are pushed to GHCR
 
 ## RPM Naming Convention
 
 The RPM release number includes the git commit hash for better traceability.
 
-## Set up the pipeline (GitHub)
+## Set up the pipeline
 
 **First-Time Repo Setup**
 
@@ -146,40 +139,7 @@ The RPM release number includes the git commit hash for better traceability.
 
 3. Create a spec file template for your package (see spec file section below).
 
-4. Ensure the repository has access to the `gemini-rtsw/rpm-repo` GHCR package. The `GITHUB_TOKEN` automatically has read access to packages in the same organization.
-
-## Set up the pipeline (GitLab)
-
-**First-Time Repo Setup**
-
-Follow these steps if this is the first time you're setting up the repository and the necessary RPM and image files are not yet available in the GitLab registry:
-
-1. Add the CI submodule:
-   ```bash
-   git submodule add -b <target branch> git@gitlab.com:nsf-noirlab/gemini/rtsw/user-tools/gemini-rtsw-ci.git gemini-rtsw-ci
-   git submodule update --init --recursive
-   git add .gitmodules gemini-rtsw-ci
-   ```
-2. Create a `.gitlab-ci.yml` file in your repository root that includes the CI template:
-   ```yaml
-   variables:
-     SCRIPTS_BRANCH: "<target branch>"
-     CI_SCRIPTS_DIR: "gemini-rtsw-ci"
-     GIT_SUBMODULE_FORCE_HTTPS: "true"
-     GIT_SUBMODULE_STRATEGY: "recursive"
-
-   include:
-     - project: 'nsf-noirlab/gemini/rtsw/user-tools/gemini-rtsw-ci'
-       ref: '<target branch>'
-       file: '.imported-ci.yml'
-
-   stages:
-     - build
-     - deploy
-   ```
-3. The `REGISTRY_TOKEN` CI/CD variable is inherited from the Gemini group level. No per-project token setup is needed.
-4. Start Runners
-   ![Runner Settings](docs/runner-settings.png)
+4. The `GITHUB_TOKEN` automatically has read access to packages in the same organization — no manual token setup is needed.
 
 ## Spec File Template
 
@@ -296,8 +256,8 @@ To install packages from this repository on a Rocky Linux system using the rpm-r
 
 * **Development Environment:** The development environment provides a consistent and isolated space for building and testing your code.
 * **RPM and Docker Image:** These are essential components for packaging and deploying your application.
-* **Container Registry:** Docker images are stored on GHCR (GitHub) or GitLab Registry (GitLab).
+* **Container Registry:** Docker images are stored on GHCR (GitHub Container Registry).
 * **RPM Repository:** RPMs are served from the rpm-repo Docker container.
 * **Spec File:** This file defines the metadata and dependencies for the RPM package.
-* **CI/CD Pipeline:** This automates the build, test, and deployment process.
+* **CI/CD Pipeline:** GitHub Actions automates the build, test, and deployment process.
 * **Git Hash in RPMs:** Each RPM includes the git commit hash in its release number for better traceability.

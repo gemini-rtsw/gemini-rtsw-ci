@@ -3,8 +3,6 @@ FROM rockylinux:9
 # Build arguments
 ARG IN_PIPELINE=false
 ARG PACKAGE_NAME
-ARG REPO_PATH=rpm-repo/1.0
-ARG RPM_REPO_METHOD=network
 
 # Enable CRB (CodeReady Builder) and EPEL
 RUN dnf install -y epel-release && \
@@ -21,31 +19,14 @@ RUN dnf install -y gcc-c++ \
     conserver \
     conserver-client
 
-# Configure RPM repository based on method
-# network: rpm-repo container accessible via Docker network (GitHub / local)
-# gitlab: GitLab package registry via BuildKit secret (GitLab CI)
-RUN --mount=type=secret,id=gitlab_token,required=false \
-    if [ "${RPM_REPO_METHOD}" = "gitlab" ]; then \
-        if [ ! -f /run/secrets/gitlab_token ]; then \
-            echo "ERROR: gitlab_token secret is required for gitlab method" && exit 1; \
-        fi && \
-        TOKEN=$(cat /run/secrets/gitlab_token) && \
-        echo -e "\n\
-[gitlab-rpm-repo]\n\
-name=GitLab RPM Repository\n\
-baseurl=https://oauth2:${TOKEN}@gitlab.com/api/v4/projects/66226575/packages/generic/${REPO_PATH}/\n\
-enabled=1\n\
-gpgcheck=0\n\
-" > /etc/yum.repos.d/rpm-repo.repo; \
-    else \
-        echo -e "\n\
+# Configure RPM repository (served by rpm-repo container on Docker network)
+RUN echo -e "\n\
 [rpm-repo]\n\
 name=RPM Repository\n\
 baseurl=http://rpm-repo:8080/rpm-repo/\n\
 enabled=1\n\
 gpgcheck=0\n\
-" > /etc/yum.repos.d/rpm-repo.repo; \
-    fi && \
+" > /etc/yum.repos.d/rpm-repo.repo && \
     dnf makecache --refresh
 
 # Create directory for RPMs
