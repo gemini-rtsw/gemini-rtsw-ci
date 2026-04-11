@@ -99,10 +99,15 @@ echo "In pipeline: $IN_PIPELINE"
 # Convert to lowercase for Docker compatibility
 REGISTRY_IMAGE=$(echo "$REGISTRY_IMAGE" | tr '[:upper:]' '[:lower:]')
 
-# Ensure rpms dir and custom-repo-setup.sh exist so COPY instructions don't fail
-# (legacy builder doesn't support glob wildcards in COPY)
+# Ensure rpms dir exists so COPY instruction doesn't fail
 mkdir -p rpms
-touch custom-repo-setup.sh
+
+# Stage custom-repo-setup.sh into a directory so COPY always succeeds
+# (legacy builder doesn't support glob wildcards in COPY)
+mkdir -p .custom-scripts
+if [ -f "custom-repo-setup.sh" ]; then
+    cp custom-repo-setup.sh .custom-scripts/
+fi
 
 # Set image tags based on whether this is a production build
 if [ "$IS_PROD" = true ]; then

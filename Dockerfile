@@ -35,15 +35,15 @@ RUN mkdir -p /tmp/rpms/
 # Copy RPMs if they exist
 COPY rpms/ /tmp/rpms/
 
-# Copy custom setup script if it exists
-COPY custom-repo-setup.sh* /tmp/
+# Copy custom setup script directory (may be empty)
+COPY .custom-scripts/ /tmp/custom-scripts/
 
 # Run custom setup script if it exists
-RUN if [ -f "/tmp/custom-repo-setup.sh" ]; then \
+RUN if [ -f "/tmp/custom-scripts/custom-repo-setup.sh" ]; then \
         echo "Found custom repo setup script, running it..." && \
-        chmod +x /tmp/custom-repo-setup.sh && \
+        chmod +x /tmp/custom-scripts/custom-repo-setup.sh && \
         cd /tmp && \
-        ./custom-repo-setup.sh ; \
+        ./custom-scripts/custom-repo-setup.sh ; \
     else \
         echo "No custom setup script found, proceeding normally..." ; \
     fi
@@ -67,7 +67,7 @@ RUN if [ "$(ls -A /tmp/rpms/ 2>/dev/null)" ]; then \
 
 # Cleanup
 RUN dnf clean all && \
-    rm -rf /var/cache/dnf /tmp/rpms /tmp/custom-repo-setup.sh /tmp/*.rpm
+    rm -rf /var/cache/dnf /tmp/rpms /tmp/custom-scripts /tmp/*.rpm
 
 # Verify installation
 CMD ["sh", "-c", "rpm -qa ${PACKAGE_NAME}"]
