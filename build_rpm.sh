@@ -112,7 +112,7 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         source /etc/profile.d/ade.sh && \
 
         # Install minimal build requirements
-        dnf install -y rpm-build make gcc gcc-c++ re2c && \
+        dnf install -y rpm-build make gcc gcc-c++ re2c git && \
 
         # Find the spec file
         SPEC_FILE=$(ls *.spec 2>/dev/null || ls SPECS/*.spec 2>/dev/null) &&
@@ -186,8 +186,9 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         mkdir -p /root/rpmbuild/SPECS &&
         cp $SPEC_FILE /root/rpmbuild/SPECS/ &&
 
-        # Build the RPM with specific flags to avoid errors
-        rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps --define "git_hash $GIT_HASH" || exit 1 &&
+        # Build the RPM (run from /work so spec %(git ...) macros can find .git)
+        cd /work &&
+        rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps || exit 1 &&
 
         # Determine the architecture directory based on the spec file
         BUILD_ARCH=$(grep "^BuildArch:" $SPEC_FILE | awk "{print \$2}") &&
