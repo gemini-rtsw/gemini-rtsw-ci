@@ -114,6 +114,10 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         # Install minimal build requirements
         dnf install -y rpm-build make gcc gcc-c++ re2c git && \
 
+        # Mark /work as safe for git (avoids dubious ownership errors
+        # when the mounted volume UID differs from the container user)
+        git config --global --add safe.directory /work && \
+
         # Find the spec file
         SPEC_FILE=$(ls *.spec 2>/dev/null || ls SPECS/*.spec 2>/dev/null) &&
         echo "Found spec file: $SPEC_FILE" &&
