@@ -38,7 +38,7 @@ COPY rpms/ /tmp/rpms/
 # Copy custom setup script if it exists
 COPY custom-repo-setup.sh* /tmp/
 
-# Run custom setup script if it exists (to handle DNF distupgrade repository issues)
+# Run custom setup script if it exists
 RUN if [ -f "/tmp/custom-repo-setup.sh" ]; then \
         echo "Found custom repo setup script, running it..." && \
         chmod +x /tmp/custom-repo-setup.sh && \

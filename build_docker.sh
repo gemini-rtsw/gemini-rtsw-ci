@@ -103,9 +103,6 @@ REGISTRY_IMAGE=$(echo "$REGISTRY_IMAGE" | tr '[:upper:]' '[:lower:]')
 # This ensures the COPY instruction in Dockerfile doesn't fail
 mkdir -p rpms
 
-# Enable BuildKit for Docker
-export DOCKER_BUILDKIT=1
-
 # Set image tags based on whether this is a production build
 if [ "$IS_PROD" = true ]; then
     TAGS="-t ${REGISTRY_IMAGE}:prod-devel -t ${REGISTRY_IMAGE}:prod"
@@ -117,14 +114,11 @@ fi
 
 start_rpm_repo
 
-# Create a buildx builder that supports custom networks
-docker buildx create --name rpm-builder --driver docker-container \
-    --driver-opt network="$RPM_REPO_NETWORK" --use
-
-docker buildx build \
+# Disable BuildKit — legacy builder supports --network with custom Docker networks
+DOCKER_BUILDKIT=0 docker build \
     --build-arg IN_PIPELINE="${IN_PIPELINE}" \
     --build-arg PACKAGE_NAME="${PACKAGE_NAME}" \
-    --load \
+    --network "$RPM_REPO_NETWORK" \
     -f "${SCRIPT_DIR}/Dockerfile" \
     ${TAGS} .
 
