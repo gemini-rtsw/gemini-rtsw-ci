@@ -99,9 +99,10 @@ echo "In pipeline: $IN_PIPELINE"
 # Convert to lowercase for Docker compatibility
 REGISTRY_IMAGE=$(echo "$REGISTRY_IMAGE" | tr '[:upper:]' '[:lower:]')
 
-# Create rpms directory if it doesn't exist
-# This ensures the COPY instruction in Dockerfile doesn't fail
+# Ensure rpms dir and custom-repo-setup.sh exist so COPY instructions don't fail
+# (legacy builder doesn't support glob wildcards in COPY)
 mkdir -p rpms
+touch custom-repo-setup.sh
 
 # Set image tags based on whether this is a production build
 if [ "$IS_PROD" = true ]; then
