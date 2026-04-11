@@ -89,6 +89,7 @@ start_rpm_repo
 echo "Running build in container..."
 docker run --rm -v $(pwd):/work -w /work \
     --network "$RPM_REPO_NETWORK" \
+    -e GIT_HASH="$GIT_HASH" \
     rockylinux:9 \
     /bin/bash -c 'set -ex && \
         # Configure RPM repository
@@ -186,7 +187,7 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         cp $SPEC_FILE /root/rpmbuild/SPECS/ &&
 
         # Build the RPM with specific flags to avoid errors
-        rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps || exit 1 &&
+        rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps --define "git_hash $GIT_HASH" || exit 1 &&
 
         # Determine the architecture directory based on the spec file
         BUILD_ARCH=$(grep "^BuildArch:" $SPEC_FILE | awk "{print \$2}") &&
