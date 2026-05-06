@@ -1,13 +1,13 @@
-FROM rockylinux:9
+FROM rockylinux:8
 
 # Build arguments
 ARG IN_PIPELINE=false
 ARG PACKAGE_NAME
 
-# Enable CRB (CodeReady Builder) and EPEL
+# Enable PowerTools and EPEL
 RUN dnf install -y epel-release && \
     dnf install -y dnf-plugins-core && \
-    dnf config-manager --set-enabled crb
+    dnf config-manager --set-enabled powertools
 
 # Install base development tools and dependencies
 RUN dnf install -y gcc-c++ \

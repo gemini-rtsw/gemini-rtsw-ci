@@ -74,13 +74,28 @@ fi
 GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "nogit")
 echo "Git hash: $GIT_HASH"
 
+# Get git branch for the release.
+# Resolve outside the container so detached-HEAD checkouts (typical in CI)
+# still get a meaningful name. Order: symbolic-ref -> CI ref env vars ->
+# any branch pointing at HEAD -> "nobranch". Sanitized for RPM-name use.
+GIT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+if [ -z "$GIT_BRANCH" ]; then
+    GIT_BRANCH=${GITHUB_REF_NAME:-${CI_COMMIT_REF_NAME:-}}
+fi
+if [ -z "$GIT_BRANCH" ]; then
+    GIT_BRANCH=$(git for-each-ref --format='%(refname:short)' --points-at HEAD refs/heads 2>/dev/null | head -1)
+fi
+GIT_BRANCH=${GIT_BRANCH:-nobranch}
+GIT_BRANCH=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9]/_/g')
+echo "Git branch: $GIT_BRANCH"
+
 echo "Building package: $PACKAGE_NAME"
 echo "Package version: $PACKAGE_VERSION"
 echo "Using spec file: $SPEC_FILE"
 
 # Pull the base image
-echo "Pulling Rocky 9 base image..."
-docker pull rockylinux:9
+echo "Pulling Rocky 8 base image..."
+docker pull rockylinux:8
 
 # Start the rpm-repo container
 start_rpm_repo
@@ -90,7 +105,8 @@ echo "Running build in container..."
 docker run --rm -v $(pwd):/work -w /work \
     --network "$RPM_REPO_NETWORK" \
     -e GIT_HASH="$GIT_HASH" \
-    rockylinux:9 \
+    -e GIT_BRANCH="$GIT_BRANCH" \
+    rockylinux:8 \
     /bin/bash -c 'set -ex && \
         # Configure RPM repository
         echo "[rpm-repo]
@@ -99,11 +115,14 @@ baseurl=http://rpm-repo:8080/rpm-repo/
 enabled=1
 gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
 
-        # Enable CRB (CodeReady Builder - formerly PowerTools) and EPEL repositories
+        # Enable powertools and EPEL repositories
         dnf install -y epel-release && \
         dnf install -y dnf-plugins-core && \
-        dnf config-manager --set-enabled crb && \
+        dnf config-manager --set-enabled powertools && \
         dnf makecache --refresh && \
+
+        # Install rclone (required by gemini-ade, no longer in EPEL 8)
+        dnf install -y https://downloads.rclone.org/rclone-current-linux-amd64.rpm && \
 
         # Install gemini-ade package
         dnf install -y gemini-ade && \
@@ -190,9 +209,14 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         mkdir -p /root/rpmbuild/SPECS &&
         cp $SPEC_FILE /root/rpmbuild/SPECS/ &&
 
-        # Build the RPM (run from /work so spec %(git ...) macros can find .git)
+        # Build the RPM (run from /work so spec %(git ...) macros can find .git).
+        # Override git_branch via --define because git rev-parse --abbrev-ref
+        # returns "HEAD" in CI's detached-HEAD checkout, which the spec then
+        # filters out and falls back to "nobranch".
         cd /work &&
-        rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps || exit 1 &&
+        rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps \
+            --define "git_branch ${GIT_BRANCH:-nobranch}" \
+            || exit 1 &&
 
         # Determine the architecture directory based on the spec file
         BUILD_ARCH=$(grep "^BuildArch:" $SPEC_FILE | awk "{print \$2}") &&
