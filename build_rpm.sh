@@ -209,10 +209,9 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         mkdir -p /root/rpmbuild/SPECS &&
         cp $SPEC_FILE /root/rpmbuild/SPECS/ &&
 
-        # Build the RPM (run from /work so spec %(git ...) macros can find .git).
-        # Override git_branch via --define because git rev-parse --abbrev-ref
-        # returns "HEAD" in CI's detached-HEAD checkout, which the spec then
-        # filters out and falls back to "nobranch".
+        # Build the RPM. Run from /work so spec git-rev-parse macros find
+        # the working .git. Override git_branch via --define because under
+        # detached HEAD checkouts the spec resolves the branch as nobranch.
         cd /work &&
         rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps \
             --define "git_branch ${GIT_BRANCH:-nobranch}" \
