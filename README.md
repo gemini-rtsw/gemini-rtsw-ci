@@ -56,16 +56,6 @@ RPM dependencies come from `ghcr.io/gemini-rtsw/rpm-repo:latest` -- a Docker con
 
 No tokens needed for RPM access -- the container serves over plain HTTP. GHCR login is only needed to pull the container image itself.
 
-## Production Builds
-
-Pass `--prod` to any script:
-
-```bash
-./gemini-rtsw-ci/build_rpm.sh --prod
-./gemini-rtsw-ci/build_docker.sh --prod
-./gemini-rtsw-ci/dev_environment.sh --prod
-```
-
 ## Custom Dependency Setup
 
 If your package has tricky dependencies (wrong versions, mixed repos, etc.), create a `custom-repo-setup.sh` in your repo root. It runs automatically before dependency resolution in both RPM and Docker builds. If the file doesn't exist, nothing happens.
