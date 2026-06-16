@@ -133,6 +133,31 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         echo "Spec file contents:" &&
         cat $SPEC_FILE &&
 
+        # --- Sanity checks on the spec ---------------------------------------
+        # 1. The spec MUST declare a -devel subpackage. The dev container
+        #    installs <pkg>-devel to pull in the pinned build/runtime deps; a
+        #    spec with no -devel silently produces an incomplete dev image.
+        if ! grep -qE "^%package devel" $SPEC_FILE; then
+            echo "ERROR: $SPEC_FILE has no '%package devel' section." &&
+            echo "       The dev container relies on <pkg>-devel to install dependencies." &&
+            exit 1
+        fi &&
+        # 2. Every PINNED BuildRequires (lines with 'name = version') must also
+        #    appear as a pinned Requires (i.e. in the -devel subpackage), so the
+        #    build environment and the dev container stay in lockstep. Build-only
+        #    tools (re2c, tdct, rpm-build, ...) are unpinned and thus ignored.
+        missing="" &&
+        for dep in $(grep -E "^BuildRequires:.*=" $SPEC_FILE | sed -E "s/^BuildRequires:[[:space:]]*([^ =]+)[[:space:]]*=.*/\1/"); do
+            grep -E "^Requires:[[:space:]]*${dep}[[:space:]]*=" $SPEC_FILE >/dev/null 2>&1 || missing="$missing $dep"
+        done &&
+        if [ -n "$missing" ]; then
+            echo "ERROR: these pinned BuildRequires are not mirrored as pinned Requires (-devel):" &&
+            echo "      $missing" &&
+            echo "       Keep BuildRequires and the -devel Requires in lockstep." &&
+            exit 1
+        fi &&
+        echo "Spec checks passed: -devel present, pinned BuildRequires mirrored in Requires." &&
+
         # Get the version directly from the spec file using grep
         PACKAGE_VERSION=$(grep "^%define version" $SPEC_FILE | awk "{print \$3}") &&
         if [ -z "$PACKAGE_VERSION" ]; then
@@ -152,9 +177,11 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
             ./custom-repo-setup.sh
         fi &&
 
-        # Install build dependencies from spec file - with error handling
+        # Install build dependencies from spec file. Hard-fail if any pinned
+        # dependency cannot be resolved -- a missing/incorrect NVR must turn the
+        # pipeline red, not silently build against whatever happens to be present.
         echo "Installing build dependencies..." &&
-        (dnf builddep -y $SPEC_FILE || echo "Warning: Some dependencies could not be installed, continuing anyway") &&
+        dnf builddep -y $SPEC_FILE &&
 
         # Create rpmbuild SOURCES directory
         mkdir -p /root/rpmbuild/SOURCES &&
