@@ -144,21 +144,12 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
             echo "ERROR: spec has no %package devel section; dev container needs the -devel RPM." &&
             exit 1
         fi &&
-        # 2. Every PINNED dependency on a BuildRequires line (any name = version
-        #    pair, anywhere on the line) must also appear pinned on a Requires
-        #    line (the -devel subpackage), so build env and dev container stay in
-        #    lockstep. Unpinned build-only tools (re2c, tdct, ...) are ignored.
-        req_pins=$(grep -E "^Requires:" $SPEC_FILE | grep -oE "[A-Za-z0-9._+-]+[[:space:]]*=[[:space:]]*[A-Za-z0-9._+:~-]+" | sed -E "s/[[:space:]]*=.*//" | sort -u) &&
-        missing="" &&
-        for dep in $(grep -E "^BuildRequires:" $SPEC_FILE | grep -oE "[A-Za-z0-9._+-]+[[:space:]]*=[[:space:]]*[A-Za-z0-9._+:~-]+" | sed -E "s/[[:space:]]*=.*//" | sort -u); do
-            echo "$req_pins" | grep -qx "$dep" || missing="$missing $dep"
-        done &&
-        if [ -n "$missing" ]; then
-            echo "ERROR: pinned BuildRequires not mirrored as pinned Requires (-devel):$missing" &&
-            echo "       Keep BuildRequires and the -devel Requires in lockstep." &&
-            exit 1
-        fi &&
-        echo "Spec checks passed: -devel present, pinned BuildRequires mirrored in Requires." &&
+        # NB: we deliberately do NOT require BuildRequires to be mirrored in
+        # Requires. Build deps are pinned (exact headers); runtime Requires are
+        # intentionally loose or absent -- support modules and VME IOCs build
+        # cross-compiled binaries that never run on this host, and pinning their
+        # runtime deps would force version conflicts when many are co-installed.
+        echo "Spec check passed: -devel subpackage present." &&
 
         # Get the version directly from the spec file using grep
         PACKAGE_VERSION=$(grep "^%define version" $SPEC_FILE | awk "{print \$3}") &&
