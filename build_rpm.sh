@@ -142,13 +142,21 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
             echo "       The dev container relies on <pkg>-devel to install dependencies." &&
             exit 1
         fi &&
-        # 2. Every PINNED BuildRequires (lines with 'name = version') must also
-        #    appear as a pinned Requires (i.e. in the -devel subpackage), so the
-        #    build environment and the dev container stay in lockstep. Build-only
-        #    tools (re2c, tdct, rpm-build, ...) are unpinned and thus ignored.
+        # 2. Every PINNED dependency on a BuildRequires line (any 'name = version'
+        #    pair, anywhere on the line) must also appear pinned on a Requires line
+        #    (i.e. in the -devel subpackage), so the build environment and the dev
+        #    container stay in lockstep. Build-only tools (re2c, tdct, rpm-build,
+        #    ...) are unpinned and thus ignored. Handles both one-dep-per-line and
+        #    many-deps-on-one-line specs.
+        pinned_names() {                              # arg: BuildRequires|Requires
+            grep -E "^$1:" $SPEC_FILE \
+              | grep -oE "[A-Za-z0-9._+-]+[[:space:]]*=[[:space:]]*[A-Za-z0-9._+:~-]+" \
+              | sed -E "s/[[:space:]]*=.*//" | sort -u
+        } &&
+        req_pins=$(pinned_names Requires) &&
         missing="" &&
-        for dep in $(grep -E "^BuildRequires:.*=" $SPEC_FILE | sed -E "s/^BuildRequires:[[:space:]]*([^ =]+)[[:space:]]*=.*/\1/"); do
-            grep -E "^Requires:[[:space:]]*${dep}[[:space:]]*=" $SPEC_FILE >/dev/null 2>&1 || missing="$missing $dep"
+        for dep in $(pinned_names BuildRequires); do
+            echo "$req_pins" | grep -qx "$dep" || missing="$missing $dep"
         done &&
         if [ -n "$missing" ]; then
             echo "ERROR: these pinned BuildRequires are not mirrored as pinned Requires (-devel):" &&
