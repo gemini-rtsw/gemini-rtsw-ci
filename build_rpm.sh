@@ -154,32 +154,26 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
 
         # --- Sanity checks on the spec ---------------------------------------
         # 1. The spec MUST declare a -devel subpackage. The dev container
-        #    installs <pkg>-devel to pull in the pinned build/runtime deps; a
-        #    spec with no -devel silently produces an incomplete dev image.
+        #    installs the -devel RPM to pull in the pinned deps; a spec with no
+        #    -devel silently produces an incomplete dev image.
+        #    NB: this whole script runs inside bash -c with SINGLE quotes, so
+        #    NO single-quote characters are allowed anywhere below (even in
+        #    comments) -- they would terminate the -c string.
         if ! grep -qE "^%package devel" $SPEC_FILE; then
-            echo "ERROR: $SPEC_FILE has no '%package devel' section." &&
-            echo "       The dev container relies on <pkg>-devel to install dependencies." &&
+            echo "ERROR: spec has no %package devel section; dev container needs the -devel RPM." &&
             exit 1
         fi &&
-        # 2. Every PINNED dependency on a BuildRequires line (any 'name = version'
-        #    pair, anywhere on the line) must also appear pinned on a Requires line
-        #    (i.e. in the -devel subpackage), so the build environment and the dev
-        #    container stay in lockstep. Build-only tools (re2c, tdct, rpm-build,
-        #    ...) are unpinned and thus ignored. Handles both one-dep-per-line and
-        #    many-deps-on-one-line specs.
-        pinned_names() {                              # arg: BuildRequires|Requires
-            grep -E "^$1:" $SPEC_FILE \
-              | grep -oE "[A-Za-z0-9._+-]+[[:space:]]*=[[:space:]]*[A-Za-z0-9._+:~-]+" \
-              | sed -E "s/[[:space:]]*=.*//" | sort -u
-        } &&
-        req_pins=$(pinned_names Requires) &&
+        # 2. Every PINNED dependency on a BuildRequires line (any name = version
+        #    pair, anywhere on the line) must also appear pinned on a Requires
+        #    line (the -devel subpackage), so build env and dev container stay in
+        #    lockstep. Unpinned build-only tools (re2c, tdct, ...) are ignored.
+        req_pins=$(grep -E "^Requires:" $SPEC_FILE | grep -oE "[A-Za-z0-9._+-]+[[:space:]]*=[[:space:]]*[A-Za-z0-9._+:~-]+" | sed -E "s/[[:space:]]*=.*//" | sort -u) &&
         missing="" &&
-        for dep in $(pinned_names BuildRequires); do
+        for dep in $(grep -E "^BuildRequires:" $SPEC_FILE | grep -oE "[A-Za-z0-9._+-]+[[:space:]]*=[[:space:]]*[A-Za-z0-9._+:~-]+" | sed -E "s/[[:space:]]*=.*//" | sort -u); do
             echo "$req_pins" | grep -qx "$dep" || missing="$missing $dep"
         done &&
         if [ -n "$missing" ]; then
-            echo "ERROR: these pinned BuildRequires are not mirrored as pinned Requires (-devel):" &&
-            echo "      $missing" &&
+            echo "ERROR: pinned BuildRequires not mirrored as pinned Requires (-devel):$missing" &&
             echo "       Keep BuildRequires and the -devel Requires in lockstep." &&
             exit 1
         fi &&
