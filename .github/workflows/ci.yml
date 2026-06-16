@@ -54,18 +54,6 @@ jobs:
           name: rpms
           path: rpms/*.rpm
 
-      # Serialize the rpm-repo publish across ALL project repos. sync_repo.sh
-      # does a pull-modify-push of the single rpm-repo:latest image, so two
-      # repos publishing at once race and the last push clobbers the other's
-      # RPM. The mutex uses a lock branch in the shared gemini-rtsw-repo, so
-      # runs from different repos contend on the same lock and queue.
-      - name: Acquire rpm-repo publish lock
-        uses: shogo82148/actions-mutex@v1
-        with:
-          key: rpm-repo-publish
-          repository: gemini-rtsw/gemini-rtsw-repo
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload RPMs to rpm-repo
         run: |
           # Clone the rpm-repo tools
