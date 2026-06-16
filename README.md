@@ -36,7 +36,7 @@ No token setup needed -- `GITHUB_TOKEN` handles everything automatically. You do
 
 ## Required package access
 
-The `ghcr.io/gemini-rtsw/rpm-repo` container is private to the org. Each project repo using this CI needs **Write** access to it: read so the build can pull dependencies, write so `sync_repo.sh` can publish the new RPM.
+The `ghcr.io/gemini-rtsw/rpm-repo` container is private to the org. Each project repo using this CI needs **Write** access to it: read so the build can pull dependencies, write so the build can publish its RPM (the publish runs `upload-rpm.sh`, which pushes the package's `rpm-*` tag and rebuilds `rpm-repo:latest`).
 
 1. Open **github.com/orgs/gemini-rtsw/packages/container/rpm-repo/settings**
 2. Under **Manage Actions access**, click **Add Repository** and add the new project repo
@@ -45,7 +45,7 @@ The `ghcr.io/gemini-rtsw/rpm-repo` container is private to the org. Each project
 Common failure modes if this is missed:
 
 - `docker: Error response from daemon: denied` during the `docker pull ghcr.io/gemini-rtsw/rpm-repo:latest` step -- no read access.
-- `denied: permission_denied: write_package` during `sync_repo.sh` -- has read but not write. **Read alone is not enough**; the pipeline pushes a new image of rpm-repo at the end.
+- `denied: permission_denied: write_package` during the publish step -- has read but not write. **Read alone is not enough**; the pipeline pushes the package's `rpm-*` tag and a new `rpm-repo:latest` at the end.
 
 ## Local Builds
 
@@ -82,5 +82,10 @@ set -e
 
 ## What the Pipeline Produces
 
-- **RPMs** -- saved as GitHub Actions artifacts, uploaded to the rpm-repo
+- **RPMs** -- saved as GitHub Actions artifacts, and published to the rpm-repo
+  via `upload-rpm.sh`: each package's RPM(s) are pushed as a per-package tag
+  `ghcr.io/gemini-rtsw/rpm-repo:rpm-<pkgname>`, and `rpm-repo:latest` (the served
+  yum repo) is rebuilt from all `rpm-*` tags. Per-package tags mean concurrent
+  builds never clobber each other -- no publish lock needed. See the
+  `gemini-rtsw-repo` README for details.
 - **Docker dev image** -- pushed to `ghcr.io/gemini-rtsw/<repo-name>:latest-devel`

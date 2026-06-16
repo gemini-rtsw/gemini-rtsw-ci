@@ -55,18 +55,20 @@ jobs:
           path: rpms/*.rpm
 
       - name: Upload RPMs to rpm-repo
+        env:
+          # upload-rpm.sh exchanges these for a GHCR bearer token to list tags.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
-          # Clone the rpm-repo tools
+          # Clone the rpm-repo tools (upload-rpm.sh + sync_repo.sh live here)
           git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
 
-          # Copy built RPMs into the rpms/ directory for sync
-          mkdir -p rpms
-          cp ../rpms/*.rpm rpms/
-
-          # Sync RPMs into the rpm-repo container and push
-          chmod +x sync_repo.sh
-          ./sync_repo.sh
+          # Hand the built RPM(s) to upload-rpm.sh: it pushes them as a
+          # per-package scratch tag, collects all rpm-* tags into ./rpms, then
+          # runs sync_repo.sh to (re)build and push rpm-repo:latest.
+          chmod +x upload-rpm.sh
+          ./upload-rpm.sh ../rpms/*.rpm
 
   build-docker:
     name: Build Docker Image
