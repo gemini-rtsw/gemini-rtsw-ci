@@ -1,13 +1,20 @@
-FROM rockylinux:8
+# EL (Rocky) major version. Default 8 so existing callers are unchanged.
+ARG EL_VERSION=8
+FROM rockylinux:${EL_VERSION}
 
-# Build arguments
+# Build arguments (ARGs before FROM are out of scope after it; redeclare)
+ARG EL_VERSION=8
 ARG IN_PIPELINE=false
 ARG PACKAGE_NAME
 
-# Enable PowerTools and EPEL
+# Enable EPEL + the CodeReady Builder repo. EL8 calls it "powertools", EL9 "crb".
 RUN dnf install -y epel-release && \
     dnf install -y dnf-plugins-core && \
-    dnf config-manager --set-enabled powertools
+    if [ "${EL_VERSION}" = "9" ]; then \
+        dnf config-manager --set-enabled crb ; \
+    else \
+        dnf config-manager --set-enabled powertools ; \
+    fi
 
 # Install base development tools and dependencies
 RUN dnf install -y gcc-c++ \

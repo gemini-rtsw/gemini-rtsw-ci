@@ -13,6 +13,11 @@ on:
         required: false
         default: 'gemini-rtsw-ci'
         type: string
+      el_version:
+        description: 'Target EL (Rocky) major version: 8 or 9'
+        required: false
+        default: '8'
+        type: string
 
 permissions:
   contents: read
@@ -43,9 +48,9 @@ jobs:
         run: |
           chmod +x ${{ inputs.scripts_dir }}/build_rpm.sh
           if [ "${{ inputs.is_prod }}" = "true" ]; then
-            ${{ inputs.scripts_dir }}/build_rpm.sh --prod
+            ${{ inputs.scripts_dir }}/build_rpm.sh --el ${{ inputs.el_version }} --prod
           else
-            ${{ inputs.scripts_dir }}/build_rpm.sh
+            ${{ inputs.scripts_dir }}/build_rpm.sh --el ${{ inputs.el_version }}
           fi
 
       - name: Upload RPM artifacts
@@ -97,7 +102,7 @@ jobs:
         run: |
           chmod +x ${{ inputs.scripts_dir }}/build_docker.sh
           if [ "${{ inputs.is_prod }}" = "true" ]; then
-            ${{ inputs.scripts_dir }}/build_docker.sh --prod
+            ${{ inputs.scripts_dir }}/build_docker.sh --el ${{ inputs.el_version }} --prod
           else
-            ${{ inputs.scripts_dir }}/build_docker.sh
+            ${{ inputs.scripts_dir }}/build_docker.sh --el ${{ inputs.el_version }}
           fi

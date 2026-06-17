@@ -9,6 +9,8 @@ RPM_REPO_CONTAINER="rpm-repo"
 RPM_REPO_NETWORK="rpm-net"
 
 IS_PROD=false
+# Target EL major version (default 8 so existing callers are unchanged).
+EL_VERSION="${EL_VERSION:-8}"
 
 # Determine script directory for finding Dockerfile
 if [ -n "$CI_SCRIPTS_DIR" ]; then
@@ -24,11 +26,25 @@ while [[ $# -gt 0 ]]; do
       IS_PROD=true
       shift
       ;;
+    --el)
+      EL_VERSION="$2"
+      shift 2
+      ;;
+    --el=*)
+      EL_VERSION="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
   esac
 done
+
+case "$EL_VERSION" in
+    8|9) ;;
+    *) echo "ERROR: unsupported --el '$EL_VERSION' (expected 8 or 9)" >&2; exit 1 ;;
+esac
+echo "Target: EL${EL_VERSION}"
 
 # Detect if we're in a CI pipeline
 IN_PIPELINE="false"
@@ -122,6 +138,7 @@ start_rpm_repo
 
 # Disable BuildKit — legacy builder supports --network with custom Docker networks
 DOCKER_BUILDKIT=0 docker build \
+    --build-arg EL_VERSION="${EL_VERSION}" \
     --build-arg IN_PIPELINE="${IN_PIPELINE}" \
     --build-arg PACKAGE_NAME="${PACKAGE_NAME}" \
     --network "$RPM_REPO_NETWORK" \

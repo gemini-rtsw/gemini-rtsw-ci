@@ -8,6 +8,25 @@ RPM_REPO_IMAGE="ghcr.io/gemini-rtsw/rpm-repo:latest"
 RPM_REPO_CONTAINER="rpm-repo"
 RPM_REPO_NETWORK="rpm-net"
 
+# Target EL (RHEL/Rocky) major version. Defaults to 8 so existing single-target
+# callers are unchanged; pass --el 9 (or EL_VERSION=9) to build for Rocky 9.
+EL_VERSION="${EL_VERSION:-8}"
+IS_PROD=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --el) EL_VERSION="$2"; shift 2 ;;
+        --el=*) EL_VERSION="${1#*=}"; shift ;;
+        -p|--prod) IS_PROD=true; shift ;;
+        *) shift ;;
+    esac
+done
+case "$EL_VERSION" in
+    8|9) ;;
+    *) echo "ERROR: unsupported --el '$EL_VERSION' (expected 8 or 9)" >&2; exit 1 ;;
+esac
+BASE_IMAGE="rockylinux:${EL_VERSION}"
+echo "Target: EL${EL_VERSION} (base image ${BASE_IMAGE})"
+
 # --- Helper functions for rpm-repo container ---
 
 start_rpm_repo() {
@@ -94,8 +113,8 @@ echo "Package version: $PACKAGE_VERSION"
 echo "Using spec file: $SPEC_FILE"
 
 # Pull the base image
-echo "Pulling Rocky 8 base image..."
-docker pull rockylinux:8
+echo "Pulling ${BASE_IMAGE} base image..."
+docker pull "$BASE_IMAGE"
 
 # Start the rpm-repo container
 start_rpm_repo
@@ -106,7 +125,8 @@ docker run --rm -v $(pwd):/work -w /work \
     --network "$RPM_REPO_NETWORK" \
     -e GIT_HASH="$GIT_HASH" \
     -e GIT_BRANCH="$GIT_BRANCH" \
-    rockylinux:8 \
+    -e EL_VERSION="$EL_VERSION" \
+    "$BASE_IMAGE" \
     /bin/bash -c 'set -ex && \
         # Configure RPM repository
         echo "[rpm-repo]
@@ -115,13 +135,19 @@ baseurl=http://rpm-repo:8080/rpm-repo/
 enabled=1
 gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
 
-        # Enable powertools and EPEL repositories
+        # Enable EPEL and the CodeReady Builder repo. On EL8 the CRB repo is
+        # named "powertools"; on EL9 it is "crb". Pick by EL_VERSION.
         dnf install -y epel-release && \
         dnf install -y dnf-plugins-core && \
-        dnf config-manager --set-enabled powertools && \
+        if [ "${EL_VERSION:-8}" = "9" ]; then \
+            dnf config-manager --set-enabled crb; \
+        else \
+            dnf config-manager --set-enabled powertools; \
+        fi && \
         dnf makecache --refresh && \
 
-        # Install rclone (required by gemini-ade, no longer in EPEL 8)
+        # Install rclone (required by gemini-ade; not in EPEL8). The upstream
+        # static RPM works on both EL8 and EL9.
         dnf install -y https://downloads.rclone.org/rclone-current-linux-amd64.rpm && \
 
         # Install gemini-ade package
