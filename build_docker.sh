@@ -125,11 +125,13 @@ if [ -f "custom-repo-setup.sh" ]; then
     cp custom-repo-setup.sh .custom-scripts/
 fi
 
-# Set image tags based on whether this is a production build
+# Set image tags based on whether this is a production build. Tags are scoped
+# by EL (el8/el9/...) so the el8 and el9 matrix legs publish distinct dev images
+# instead of clobbering one shared :latest-devel / :prod-devel tag.
 if [ "$IS_PROD" = true ]; then
-    TAGS="-t ${REGISTRY_IMAGE}:prod-devel -t ${REGISTRY_IMAGE}:prod"
+    TAGS="-t ${REGISTRY_IMAGE}:el${EL_VERSION}-prod-devel -t ${REGISTRY_IMAGE}:el${EL_VERSION}-prod"
 else
-    TAGS="-t ${REGISTRY_IMAGE}:latest-devel -t ${REGISTRY_IMAGE}:latest"
+    TAGS="-t ${REGISTRY_IMAGE}:el${EL_VERSION}-latest-devel -t ${REGISTRY_IMAGE}:el${EL_VERSION}-latest"
 fi
 
 # --- Build the Docker image ---
@@ -153,11 +155,11 @@ if [ -n "$GITHUB_ACTIONS" ]; then
     echo "Running in GitHub Actions, pushing images to GHCR..."
 
     if [ "$IS_PROD" = true ]; then
-        docker push "${REGISTRY_IMAGE}:prod"
-        docker push "${REGISTRY_IMAGE}:prod-devel"
+        docker push "${REGISTRY_IMAGE}:el${EL_VERSION}-prod"
+        docker push "${REGISTRY_IMAGE}:el${EL_VERSION}-prod-devel"
     else
-        docker push "${REGISTRY_IMAGE}:latest"
-        docker push "${REGISTRY_IMAGE}:latest-devel"
+        docker push "${REGISTRY_IMAGE}:el${EL_VERSION}-latest"
+        docker push "${REGISTRY_IMAGE}:el${EL_VERSION}-latest-devel"
     fi
 
     echo "Successfully pushed all images"
@@ -165,10 +167,10 @@ else
     echo
     echo "Images built successfully. To push them, run:"
     if [ "$IS_PROD" = true ]; then
-        echo "docker push ${REGISTRY_IMAGE}:prod"
-        echo "docker push ${REGISTRY_IMAGE}:prod-devel"
+        echo "docker push ${REGISTRY_IMAGE}:el${EL_VERSION}-prod"
+        echo "docker push ${REGISTRY_IMAGE}:el${EL_VERSION}-prod-devel"
     else
-        echo "docker push ${REGISTRY_IMAGE}:latest"
-        echo "docker push ${REGISTRY_IMAGE}:latest-devel"
+        echo "docker push ${REGISTRY_IMAGE}:el${EL_VERSION}-latest"
+        echo "docker push ${REGISTRY_IMAGE}:el${EL_VERSION}-latest-devel"
     fi
 fi
