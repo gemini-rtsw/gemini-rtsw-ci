@@ -3,8 +3,8 @@
 # Ensure script fails on any error
 set -e
 
-# RPM repo container settings
-RPM_REPO_IMAGE="ghcr.io/gemini-rtsw/rpm-repo:latest"
+# RPM repo container settings. RPM_REPO_IMAGE is resolved AFTER arg parsing
+# (it depends on EL_VERSION); see below.
 RPM_REPO_CONTAINER="rpm-repo"
 RPM_REPO_NETWORK="rpm-net"
 
@@ -26,6 +26,13 @@ case "$EL_VERSION" in
 esac
 BASE_IMAGE="rockylinux:${EL_VERSION}"
 echo "Target: EL${EL_VERSION} (base image ${BASE_IMAGE})"
+
+# Pull the per-EL rpm-repo image (~half the size of the combined :latest, so
+# the runner disk doesn't overflow). Overridable via the RPM_REPO_IMAGE env
+# var, so CI/ops can repoint it without another submodule bump. Falls back to
+# the combined :latest only if explicitly set that way.
+RPM_REPO_IMAGE="${RPM_REPO_IMAGE:-ghcr.io/gemini-rtsw/rpm-repo:latest-el${EL_VERSION}}"
+echo "Using rpm-repo image: ${RPM_REPO_IMAGE}"
 
 # --- Helper functions for rpm-repo container ---
 

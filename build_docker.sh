@@ -3,8 +3,8 @@
 # Ensure script fails on any error
 set -e
 
-# RPM repo container settings
-RPM_REPO_IMAGE="ghcr.io/gemini-rtsw/rpm-repo:latest"
+# RPM repo container settings. RPM_REPO_IMAGE is resolved after arg parsing
+# (depends on EL_VERSION); see below.
 RPM_REPO_CONTAINER="rpm-repo"
 RPM_REPO_NETWORK="rpm-net"
 
@@ -45,6 +45,11 @@ case "$EL_VERSION" in
     *) echo "ERROR: unsupported --el '$EL_VERSION' (expected 8 or 9)" >&2; exit 1 ;;
 esac
 echo "Target: EL${EL_VERSION}"
+
+# Pull the per-EL rpm-repo image (~half size, fits the runner disk).
+# Overridable via RPM_REPO_IMAGE so CI/ops can repoint without a submodule bump.
+RPM_REPO_IMAGE="${RPM_REPO_IMAGE:-ghcr.io/gemini-rtsw/rpm-repo:latest-el${EL_VERSION}}"
+echo "Using rpm-repo image: ${RPM_REPO_IMAGE}"
 
 # Detect if we're in a CI pipeline
 IN_PIPELINE="false"
