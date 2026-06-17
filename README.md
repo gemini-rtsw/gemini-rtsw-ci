@@ -89,3 +89,96 @@ set -e
   builds never clobber each other -- no publish lock needed. See the
   `gemini-rtsw-repo` README for details.
 - **Docker dev image** -- pushed to `ghcr.io/gemini-rtsw/<repo-name>:latest-devel`
+
+---
+
+## Appendix: Proposed dependency-versioning model (DESIGN -- not implemented)
+
+> Status: **draft for team discussion.** Nothing here is built yet. It documents
+> a direction for replacing today's hand-pinned `BuildRequires` with an
+> automated float-for-dev / lock-for-release scheme. Do not treat as current
+> behavior.
+
+### Problem this solves
+
+Today every spec hard-pins its dependencies in-tree, e.g.:
+
+```
+BuildRequires: epics-base-devel = 7.0.7-0.git.<hash>%{?dist}
+BuildRequires: sequencer-devel  = 2.2.9...-4.git.<hash>%{?dist}
+```
+
+This is both **manual** and **permanent in git**, so any time a low-level
+package (rtems, epics-base, a support module) is rebuilt, every downstream spec
+must be hand-edited to the new hash -- across ~20 repos, in dependency order.
+That is error-prone (mistyped hashes, missed repos, stale pins) and slow.
+
+The two requirements are in tension:
+
+- **Development** wants dependencies to **float** -- pick up the latest build
+  automatically, no manual pinning.
+- **Releases** want dependencies **pinned** -- an exact, reproducible set we can
+  return to later for fixes.
+
+### Proposed model: float by default, lock at release
+
+**1. Specs float (no version pins in dev).**
+BuildRequires are written **unversioned**:
+
+```
+BuildRequires: epics-base-devel
+BuildRequires: sequencer-devel
+```
+
+Each build resolves whatever is newest in `rpm-repo:latest`. No pinning, no
+hand-edits. A rebuilt dependency simply flows downstream on the next build.
+
+**2. (Optional) triggers keep the DAG current.**
+When a low-level package publishes, a `repository_dispatch` can fan out to its
+dependents so they rebuild against the new version automatically. Caveat: this
+multiplies builds (one rtems publish -> ~20 dependent rebuilds, each ~90 min +
+a large rpm-repo push), so triggers should likely **batch** (rebuild dependents
+once after a set of low-level changes settles) rather than fire per-publish.
+
+**3. Releases are locked by a GENERATED lockfile (never hand-edited).**
+A `make-release` step:
+  a. builds normally (against current latest),
+  b. records the **exact NVR of every dependency that was actually resolved**
+     (queried from the build container / rpm-repo) into a generated lockfile,
+  c. commits the lockfile and tags the release.
+
+Example generated `<pkg>.lock` (illustrative):
+
+```
+# GENERATED -- do not edit. Captured at release time from the live repo.
+epics-base-devel = 7.0.7-0.git.1159d86
+sequencer-devel  = 2.2.9.e5e3615-4.git.cc55bbd
+slalib-devel     = 1.9.7-6.git.21692df
+...
+```
+
+**4. Returning to a release rebuilds in "locked" mode.**
+When a lockfile is present (i.e. building a release tag), `build_rpm.sh` builds
+in locked mode: it injects each lockfile NVR as an exact pin **at build time**
+(auto-generated into the spec / passed to dnf) -- the human never types a hash.
+Same spec, two modes: floating (no lock) for dev, pinned (lock present) for
+release.
+
+### Why this removes human error
+
+The lockfile is **read from reality, not authored** -- the generator records
+what actually built, exactly as the one-time manual repin done by hand would,
+but deterministically and every time. No transcribed hashes, no missed repos.
+
+### Open questions for the team
+
+- **Per-package lockfiles vs. one fleet-wide manifest.** A single
+  release-wide manifest (pinning all packages together, tagged as a unit -- e.g.
+  "2026q3") may model a coordinated release better than N per-IOC lockfiles.
+- **Retention.** Locked rebuilds require the old RPMs to still exist in
+  rpm-repo. Old NVRs must not be pruned (or release RPMs must be archived),
+  or past releases become unbuildable.
+- **Trigger batching / cost.** Given ~90 min builds and large rpm-repo pushes,
+  decide whether/how to cascade rebuilds without build amplification.
+- **Where locked-mode pinning is injected.** Generating a pinned spec from the
+  floating spec + lock, vs. passing versions to `dnf`/`builddep` directly.
