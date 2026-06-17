@@ -70,47 +70,12 @@ jobs:
           git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
 
-          # --tag-only: push the per-package, per-EL scratch tag and STOP. The
-          # :latest rebuild happens once in the separate publish job below, so
-          # parallel build legs (el8/el9) never race on :latest.
+          # --tag-only: push the per-package, per-EL scratch tag and STOP.
+          # The :latest rebuild happens ONCE in the caller's `publish` job
+          # (publish.yml), which runs after BOTH the el8 and el9 matrix legs
+          # finish -- so there is a single writer of :latest and no race.
           chmod +x upload-rpm.sh
           ./upload-rpm.sh --tag-only ../rpms/*.rpm
-
-  publish:
-    name: Publish to rpm-repo:latest
-    runs-on: ubuntu-latest
-    needs: build-rpm
-    # Serialize the :latest rebuild. el8 and el9 are SEPARATE workflow_call
-    # runs of THIS reusable workflow, so `needs:` can't order them -- but a
-    # reusable workflow's concurrency group is scoped to the CALLER repo, and
-    # both legs share one caller, so this constant key makes the el8 and el9
-    # publish jobs queue instead of racing on the single mutable :latest tag.
-    # cancel-in-progress:false so a queued publish is never dropped.
-    #
-    # CAVEAT: concurrency is per-repo, so this does NOT serialize publishes
-    # across DIFFERENT repos building at the same time. Those can still race on
-    # :latest -- but the loser's RPMs survive in their scratch tags and are
-    # re-merged by the next sync_repo.sh, so nothing is lost (it may just be
-    # briefly absent from :latest). The common case we hit -- el8 vs el9 of one
-    # package -- is fully fixed here.
-    concurrency:
-      group: rpm-repo-publish
-      cancel-in-progress: false
-    steps:
-      - name: Rebuild and push rpm-repo:latest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-        run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
-          cd gemini-rtsw-repo
-
-          # sync_repo.sh is the single writer of :latest: it pulls EVERY rpm-*
-          # scratch tag (incl. the one this run just pushed) + the old :latest,
-          # runs createrepo, and pushes :latest.
-          chmod +x sync_repo.sh
-          docker login ghcr.io -u "$GITHUB_ACTOR" -p "$GITHUB_TOKEN"
-          ./sync_repo.sh
 
   build-docker:
     name: Build Docker Image

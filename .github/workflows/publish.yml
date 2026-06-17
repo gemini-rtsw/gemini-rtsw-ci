@@ -1,0 +1,44 @@
+name: Publish to rpm-repo:latest
+
+# Single-writer publish step. Called ONCE by a repo's CI after all EL build
+# legs (el8 + el9) have finished and pushed their per-package scratch tags.
+# It rebuilds rpm-repo:latest from the full scratch-tag set, so there is one
+# writer of :latest per run and the el8/el9 legs never race on it.
+#
+# Caller wires it as a final job:
+#   publish:
+#     needs: build
+#     uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main-el8
+#     secrets: inherit
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Rebuild and push rpm-repo:latest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rebuild :latest from all scratch tags
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
+          cd gemini-rtsw-repo
+
+          # sync_repo.sh is the single writer of :latest: it pulls EVERY rpm-*
+          # scratch tag + the old :latest, runs createrepo, and pushes :latest.
+          chmod +x sync_repo.sh
+          ./sync_repo.sh
