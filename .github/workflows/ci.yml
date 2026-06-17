@@ -61,21 +61,56 @@ jobs:
           name: rpms-el${{ inputs.el_version }}
           path: rpms/*.rpm
 
-      - name: Upload RPMs to rpm-repo
+      - name: Push RPM scratch tag (no :latest rebuild)
         env:
-          # upload-rpm.sh exchanges these for a GHCR bearer token to list tags.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: |
-          # Clone the rpm-repo tools (upload-rpm.sh + sync_repo.sh live here)
+          # Clone the rpm-repo tools (upload-rpm.sh + sync_repo.sh live here).
           git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
 
-          # Hand the built RPM(s) to upload-rpm.sh: it pushes them as a
-          # per-package scratch tag, collects all rpm-* tags into ./rpms, then
-          # runs sync_repo.sh to (re)build and push rpm-repo:latest.
+          # --tag-only: push the per-package, per-EL scratch tag and STOP. The
+          # :latest rebuild happens once in the separate publish job below, so
+          # parallel build legs (el8/el9) never race on :latest.
           chmod +x upload-rpm.sh
-          ./upload-rpm.sh ../rpms/*.rpm
+          ./upload-rpm.sh --tag-only ../rpms/*.rpm
+
+  publish:
+    name: Publish to rpm-repo:latest
+    runs-on: ubuntu-latest
+    needs: build-rpm
+    # Serialize the :latest rebuild. el8 and el9 are SEPARATE workflow_call
+    # runs of THIS reusable workflow, so `needs:` can't order them -- but a
+    # reusable workflow's concurrency group is scoped to the CALLER repo, and
+    # both legs share one caller, so this constant key makes the el8 and el9
+    # publish jobs queue instead of racing on the single mutable :latest tag.
+    # cancel-in-progress:false so a queued publish is never dropped.
+    #
+    # CAVEAT: concurrency is per-repo, so this does NOT serialize publishes
+    # across DIFFERENT repos building at the same time. Those can still race on
+    # :latest -- but the loser's RPMs survive in their scratch tags and are
+    # re-merged by the next sync_repo.sh, so nothing is lost (it may just be
+    # briefly absent from :latest). The common case we hit -- el8 vs el9 of one
+    # package -- is fully fixed here.
+    concurrency:
+      group: rpm-repo-publish
+      cancel-in-progress: false
+    steps:
+      - name: Rebuild and push rpm-repo:latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
+          cd gemini-rtsw-repo
+
+          # sync_repo.sh is the single writer of :latest: it pulls EVERY rpm-*
+          # scratch tag (incl. the one this run just pushed) + the old :latest,
+          # runs createrepo, and pushes :latest.
+          chmod +x sync_repo.sh
+          docker login ghcr.io -u "$GITHUB_ACTOR" -p "$GITHUB_TOKEN"
+          ./sync_repo.sh
 
   build-docker:
     name: Build Docker Image
