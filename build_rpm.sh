@@ -228,6 +228,19 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         echo "Installing build dependencies..." &&
         dnf builddep -y $SPEC_FILE &&
 
+        # --- Report the EXACT versions this build resolved against -----------
+        # Print every -devel build dependency that the spec named, with the
+        # exact NVR that actually got installed, in copy-pasteable pin form.
+        # Read the log of any build to see what to hard-pin in a release spec
+        # (see the dependency-versioning appendix in README). No single quotes
+        # below -- this whole block runs inside bash -c with single quotes.
+        echo "========== BUILD DEPENDENCY VERSIONS (pin these) ==========" &&
+        for dep in $(grep -hoE "^(BuildRequires|Requires):[^#]*" $SPEC_FILE | sed -E "s/^(BuildRequires|Requires)://" | tr "," " " | tr -s " " "\n" | grep -- "-devel" | sort -u); do
+            nvr=$(rpm -q --queryformat "%{NAME} = %{VERSION}-%{RELEASE}" "$dep" 2>/dev/null || true);
+            case "$nvr" in *" = "*) echo "  $nvr" ;; *) echo "  $dep (NOT INSTALLED)" ;; esac;
+        done;
+        echo "===========================================================" &&
+
         # Create rpmbuild SOURCES directory
         mkdir -p /root/rpmbuild/SOURCES &&
 
