@@ -56,7 +56,9 @@ jobs:
       - name: Upload RPM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rpms
+          # Scope by EL so matrix legs (el8/el9) don't collide on one artifact
+          # name -- otherwise the docker job could download the wrong EL's RPMs.
+          name: rpms-el${{ inputs.el_version }}
           path: rpms/*.rpm
 
       - name: Upload RPMs to rpm-repo
@@ -88,7 +90,7 @@ jobs:
       - name: Download RPM artifacts
         uses: actions/download-artifact@v4
         with:
-          name: rpms
+          name: rpms-el${{ inputs.el_version }}
           path: rpms/
 
       - name: Login to GHCR
