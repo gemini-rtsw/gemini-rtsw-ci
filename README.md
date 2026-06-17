@@ -92,37 +92,43 @@ set -e
 
 ---
 
-## Appendix: Proposed dependency-versioning model (DESIGN -- not implemented)
+## Appendix: Dependency-versioning model (DESIGN -- not yet adopted)
 
-> Status: **draft for team discussion.** Nothing here is built yet. It documents
-> a direction for replacing today's hand-pinned `BuildRequires` with an
-> automated float-for-dev / lock-for-release scheme. Do not treat as current
-> behavior.
+> Status: **documented direction, not current practice.** Today we still pin
+> dependencies by hand in each spec as we build up the stack ("pin as we go").
+> This appendix describes where we intend to take it. The plan is **entirely
+> spec-defined** -- no lockfiles, no extra file formats -- and the dev/release
+> split is a **release policy**, not a pipeline feature.
 
 ### Problem this solves
 
-Today every spec hard-pins its dependencies in-tree, e.g.:
+Every spec hard-pins its dependencies in-tree, e.g.:
 
 ```
 BuildRequires: epics-base-devel = 7.0.7-0.git.<hash>%{?dist}
 BuildRequires: sequencer-devel  = 2.2.9...-4.git.<hash>%{?dist}
 ```
 
-This is both **manual** and **permanent in git**, so any time a low-level
-package (rtems, epics-base, a support module) is rebuilt, every downstream spec
-must be hand-edited to the new hash -- across ~20 repos, in dependency order.
-That is error-prone (mistyped hashes, missed repos, stale pins) and slow.
+Because the RPM Release embeds the source git hash, **every rebuild of a
+low-level package moves its hash**, so every downstream spec must be hand-edited
+to the new hash -- across ~20 repos, in dependency order. Error-prone (mistyped
+hashes, missed repos, stale pins) and slow.
 
 The two requirements are in tension:
 
-- **Development** wants dependencies to **float** -- pick up the latest build
-  automatically, no manual pinning.
+- **Development** wants dependencies to **float** -- pick up the latest build,
+  no manual pinning, no hash chasing.
 - **Releases** want dependencies **pinned** -- an exact, reproducible set we can
   return to later for fixes.
 
-### Proposed model: float by default, lock at release
+### The model: spec-defined, float on dev, pin at release
 
-**1. Specs float (no version pins in dev).**
+The spec is the **single source of truth** for versions in both states. There is
+no separate lockfile; the pins live in the `.spec` so the shipped RPM is
+self-describing -- `rpm -q --requires <pkg>` on a production box shows the exact
+dependency set, no digging through repos.
+
+**1. `main` (dev) carries FLOATING dependencies.**
 BuildRequires are written **unversioned**:
 
 ```
@@ -130,55 +136,62 @@ BuildRequires: epics-base-devel
 BuildRequires: sequencer-devel
 ```
 
-Each build resolves whatever is newest in `rpm-repo:latest`. No pinning, no
-hand-edits. A rebuilt dependency simply flows downstream on the next build.
+Each build resolves whatever is newest in the rpm-repo. No pinning, no
+hand-edits, no hash treadmill. A rebuilt dependency simply flows downstream on
+the next build.
 
-**2. (Optional) triggers keep the DAG current.**
-When a low-level package publishes, a `repository_dispatch` can fan out to its
-dependents so they rebuild against the new version automatically. Caveat: this
-multiplies builds (one rtems publish -> ~20 dependent rebuilds, each ~90 min +
-a large rpm-repo push), so triggers should likely **batch** (rebuild dependents
-once after a set of low-level changes settles) rather than fire per-publish.
+**2. A release is a TAG/branch with PINNED dependencies in the spec.**
+Cutting a release is a deliberate act:
+  a. reach a known-good point on `main`,
+  b. create a release branch/tag,
+  c. on that release branch, the spec's BuildRequires are written as exact NVRs
+     (`epics-base-devel = 7.0.7-0.git.<hash>%{?dist}`),
+  d. commit + tag.
 
-**3. Releases are locked by a GENERATED lockfile (never hand-edited).**
-A `make-release` step:
-  a. builds normally (against current latest),
-  b. records the **exact NVR of every dependency that was actually resolved**
-     (queried from the build container / rpm-repo) into a generated lockfile,
-  c. commits the lockfile and tags the release.
+The release tag *is* the pinned spec. To rebuild a release, check out its
+tag -- the exact pins are right there in the spec. Nothing else to consult.
 
-Example generated `<pkg>.lock` (illustrative):
+**3. Pins are filled FROM REALITY, not typed by hand.**
+To remove transcription error, a small helper writes the resolved NVRs back into
+the spec at release time (the human reviews the `git diff`, then commits):
+  - build once (floating) on the release branch,
+  - query the exact NVR of each dependency that actually resolved (from the
+    build container, or the rpm-repo), and
+  - rewrite each `BuildRequires`/`Requires` line in the spec to that NVR.
 
-```
-# GENERATED -- do not edit. Captured at release time from the live repo.
-epics-base-devel = 7.0.7-0.git.1159d86
-sequencer-devel  = 2.2.9.e5e3615-4.git.cc55bbd
-slalib-devel     = 1.9.7-6.git.21692df
-...
-```
+Same "read from reality, deterministic, no typos" property as a generated
+lockfile -- but the result lands **in the spec**, where ops can read it off the
+installed RPM.
 
-**4. Returning to a release rebuilds in "locked" mode.**
-When a lockfile is present (i.e. building a release tag), `build_rpm.sh` builds
-in locked mode: it injects each lockfile NVR as an exact pin **at build time**
-(auto-generated into the spec / passed to dnf) -- the human never types a hash.
-Same spec, two modes: floating (no lock) for dev, pinned (lock present) for
-release.
+**4. After a release is tagged, `main` goes back to floating.**
+The pins live only on the release branch/tag. `main` strips them so development
+keeps floating. (This is exactly the workflow we plan to adopt: pin as we
+build up the current stack, tag a release branch once it's solid, then remove
+the pins from `main`.)
 
-### Why this removes human error
+### Why this beats the lockfile approach
 
-The lockfile is **read from reality, not authored** -- the generator records
-what actually built, exactly as the one-time manual repin done by hand would,
-but deterministically and every time. No transcribed hashes, no missed repos.
+- **No new file format**, no "locked mode" build logic, no lockfile-vs-spec
+  dual source. One source of truth: the spec.
+- **No pipeline changes** -- the pipeline already builds whatever the spec says.
+  Floating spec -> floating build; pinned spec -> pinned build. It never needs
+  to know which mode it is in.
+- **Production provenance is in the artifact.** `rpm -q --requires` / `rpm -qV`
+  on the box tells you the exact versions -- no repo archaeology.
+- The only new tooling is the optional **release-time pin helper**; pinning can
+  always be done by hand as a fallback.
 
 ### Open questions for the team
 
-- **Per-package lockfiles vs. one fleet-wide manifest.** A single
-  release-wide manifest (pinning all packages together, tagged as a unit -- e.g.
-  "2026q3") may model a coordinated release better than N per-IOC lockfiles.
-- **Retention.** Locked rebuilds require the old RPMs to still exist in
-  rpm-repo. Old NVRs must not be pruned (or release RPMs must be archived),
-  or past releases become unbuildable.
-- **Trigger batching / cost.** Given ~90 min builds and large rpm-repo pushes,
-  decide whether/how to cascade rebuilds without build amplification.
-- **Where locked-mode pinning is injected.** Generating a pinned spec from the
-  floating spec + lock, vs. passing versions to `dnf`/`builddep` directly.
+- **Where the helper reads NVRs from.** Querying the build container after a
+  build (most accurate -- it's literally what linked) vs. querying the rpm-repo
+  at pin time (simpler, slightly less precise if the repo moved meanwhile).
+- **Per-package vs. fleet-wide release.** Tagging each repo's release branch
+  independently vs. a coordinated fleet release (e.g. "2026q3") where all specs
+  are pinned and tagged together as a unit.
+- **Retention.** Rebuilding an old release needs its old RPMs to still exist in
+  the rpm-repo. Old NVRs must not be pruned (or release RPMs archived), or past
+  releases become unbuildable.
+- **Optional dependency triggers.** Whether a low-level publish should fan out
+  rebuilds to dependents on `main`; if so, batch them (one rtems publish ->
+  ~20 dependents, each ~90 min) rather than firing per-publish.
