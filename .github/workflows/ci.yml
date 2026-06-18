@@ -99,6 +99,20 @@ jobs:
         with:
           submodules: recursive
 
+      # The dev-image build pulls the rpm-repo (~6GB) + installs the full dep
+      # set into the container; reclaim runner disk first or it runs out (~1GB
+      # short observed).
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Download RPM artifacts
         uses: actions/download-artifact@v4
         with:
