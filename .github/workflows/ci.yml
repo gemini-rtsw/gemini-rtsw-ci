@@ -23,9 +23,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  RPM_REPO_IMAGE: ghcr.io/gemini-rtsw/rpm-repo:latest
-
 jobs:
   build-rpm:
     name: Build RPM
