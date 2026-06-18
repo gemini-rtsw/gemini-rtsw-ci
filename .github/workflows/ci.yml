@@ -93,11 +93,6 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     needs: build-rpm
-    # The dev image is critical for development but NOT for the migration / RPM
-    # publish path. Don't let a dev-image build failure fail the workflow (which
-    # would skip the publish job and keep the RPM out of :latest). Its failures
-    # are surfaced but non-blocking; the dev-image bloat is fixed separately.
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
