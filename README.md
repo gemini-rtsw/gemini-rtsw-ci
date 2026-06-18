@@ -195,3 +195,70 @@ the pins from `main`.)
 - **Optional dependency triggers.** Whether a low-level publish should fan out
   rebuilds to dependents on `main`; if so, batch them (one rtems publish ->
   ~20 dependents, each ~90 min) rather than firing per-publish.
+
+---
+
+## Appendix: Repo-less dependency delivery (FUTURE IDEA -- not planned yet)
+
+> Status: **idea for the long term.** Captures a direction for when the served
+> yum repo eventually outgrows the per-EL split (runner disk is the binding
+> limit). Nothing here is built or scheduled.
+
+### The problem it addresses
+
+Today CI resolves dependencies by pulling a whole yum-repo container image
+(`rpm-repo:latest-el8` / `-el9`) and pointing `dnf` at it. That image grows as
+RPMs accumulate, and each build runner must pull all of it (multi-GB) even
+though a build needs only a handful of RPMs. The per-EL split bought time, but
+growth is unbounded without a retention policy.
+
+### The idea: pull only the RPMs a build needs, build a tiny local repo
+
+Eliminate the big shared repo image from the build path. Instead, each build:
+
+1. determines the exact set of RPMs it needs (its dependency closure -- see
+   below),
+2. **pulls only those per-RPM scratch tags** (`rpm-<NVRA>`) -- the tags already
+   exist (every RPM is one), so this is just `docker pull` of a few tiny images
+   and extracting the `.rpm` files,
+3. runs `createrepo_c` over that small local directory (a few hundred MB, not
+   several GB) and points `dnf` at it,
+4. builds.
+
+This keeps `dnf` doing real dependency resolution, but over a minimal local
+repo instead of the full one. The space problem disappears (a build never pulls
+more than it uses), pulls are fast and parallel, and there is no el8/el9 repo
+split to maintain -- a build just pulls the exact NVRAs it wants.
+
+### Why it fits what already exists
+
+The per-RPM scratch-tag model (see the main README) is exactly the primitive
+this needs: every RPM is already an independently pullable tag. The change is
+on the *consumer* side -- stop pulling the big repo image, pull tags directly.
+
+### The hard part: transitive dependency closure
+
+A yum repo's real value is letting `dnf` resolve the *transitive* graph
+(epics-base-devel pulls its own deps; gemini-ade needs tdct; etc.). Pulling
+individual RPMs means the build must know the **full closure** up front, or
+`dnf` fails on a missing dep. Two ways to get it:
+
+- **Complete pins in the spec.** If release specs carry the fully-resolved
+  dependency set (which the "spec-defined dependency-versioning" appendix above
+  is heading toward, aided by the build-dep version printout in `build_rpm.sh`),
+  the build already knows its closure and can pull exactly those tags.
+- **Iterative resolve-and-pull.** Pull direct deps, run `dnf`, and on "nothing
+  provides X" pull X's tag and retry, until satisfied. Works without complete
+  pins but is fiddly.
+
+The first approach is preferred and is why this idea and the spec-pinning policy
+reinforce each other.
+
+### Tradeoffs / open questions
+
+- **Build complexity moves into `build_rpm.sh`** (pinned submodule): closure
+  determination + tag pulls + local `createrepo`. More moving parts per build.
+- **Human/IOC consumers** lose the single `baseurl=` repo they `dnf install`
+  from. Might still publish a full repo occasionally for deployment, separate
+  from the CI path.
+- **Where closure comes from** -- complete spec pins vs. an iterative resolver.
