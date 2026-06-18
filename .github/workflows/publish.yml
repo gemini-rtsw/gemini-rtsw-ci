@@ -1,9 +1,12 @@
-name: Publish to rpm-repo:latest
+name: Publish to rpm-repo per-EL images
 
-# Single-writer publish step. Called ONCE by a repo's CI after all EL build
-# legs (el8 + el9) have finished and pushed their per-package scratch tags.
-# It rebuilds rpm-repo:latest from the full scratch-tag set, so there is one
-# writer of :latest per run and the el8/el9 legs never race on it.
+# Single-writer publish step. Called by a repo's CI after the build legs have
+# pushed their per-package scratch tags. Rebuilds the per-EL yum images
+# (rpm-repo:latest-el8 / :latest-el9) from the full scratch-tag set.
+#
+# el8 and el9 run as SEPARATE matrix jobs (separate runners) so each runner
+# only assembles ONE multi-GB image on its own fresh disk -- avoiding the
+# runner-disk overflow that hit when both were built on one runner.
 #
 # Caller wires it as a final job:
 #   publish:
@@ -20,17 +23,25 @@ permissions:
 
 jobs:
   publish:
-    name: Rebuild and push rpm-repo:latest
+    name: Rebuild :latest-el${{ matrix.el }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        el: ['8', '9']
     steps:
-      # sync_repo.sh pulls the ~6GB :latest, all scratch tags, and rebuilds --
-      # free the runner disk first so it doesn't hit "No space left on device".
+      # Aggressively reclaim runner disk (~30-40GB) before pulling tags and
+      # assembling a multi-GB image (the build context alone is several GB).
       - name: Free up disk space
-        run: |
-          sudo rm -rf /opt/hostedtoolcache /usr/local/lib/android \
-            /usr/share/dotnet /usr/local/.ghcup /opt/ghc \
-            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
-          df -h /
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -39,15 +50,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Rebuild :latest from all scratch tags
+      - name: Rebuild :latest-el${{ matrix.el }} from scratch tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: |
+          df -h /
           git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
-
-          # sync_repo.sh is the single writer of :latest: it pulls EVERY rpm-*
-          # scratch tag + the old :latest, runs createrepo, and pushes :latest.
           chmod +x sync_repo.sh
-          ./sync_repo.sh
+          # Build only this EL's image (separate runner per EL).
+          ./sync_repo.sh ${{ matrix.el }}

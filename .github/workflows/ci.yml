@@ -34,18 +34,20 @@ jobs:
           submodules: recursive
           fetch-depth: 50
 
-      # Free ~25-30GB by removing preinstalled toolchains this build never
-      # uses. The RTEMS cross-compile + pulling the ~6GB rpm-repo:latest fills
-      # the default runner '/' and the build dies with "No space left on
-      # device" (during dnf install of deps, or the final ld link). This is a
-      # stopgap until rpm-repo:latest is split into per-EL images (each ~half).
+      # Aggressively reclaim runner disk (~30-40GB). The RTEMS cross-compile +
+      # pulling the per-EL rpm-repo image fills the default runner '/' and the
+      # build dies with "No space left on device" (dnf dep install, ld link, or
+      # the multi-GB build context).
       - name: Free up disk space
-        run: |
-          sudo rm -rf /opt/hostedtoolcache /usr/local/lib/android \
-            /usr/share/dotnet /usr/local/.ghcup /opt/ghc \
-            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
-          sudo docker image prune -af || true
-          df -h /
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
       - name: Login to GHCR
         uses: docker/login-action@v3
