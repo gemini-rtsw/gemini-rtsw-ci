@@ -31,7 +31,7 @@ echo "Target: EL${EL_VERSION} (base image ${BASE_IMAGE})"
 # the runner disk doesn't overflow). Overridable via the RPM_REPO_IMAGE env
 # var, so CI/ops can repoint it without another submodule bump. Falls back to
 # the combined :latest only if explicitly set that way.
-RPM_REPO_IMAGE="${RPM_REPO_IMAGE:-ghcr.io/gemini-rtsw/rpm-repo:latest-el${EL_VERSION}}"
+RPM_REPO_IMAGE="${RPM_REPO_IMAGE:-ghcr.io/gemini-rtsw/rpm-repo:latest}"
 echo "Using rpm-repo image: ${RPM_REPO_IMAGE}"
 
 # --- Helper functions for rpm-repo container ---

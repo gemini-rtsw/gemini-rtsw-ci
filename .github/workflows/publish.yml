@@ -1,12 +1,8 @@
-name: Publish to rpm-repo per-EL images
+name: Publish to rpm-repo:latest
 
 # Single-writer publish step. Called by a repo's CI after the build legs have
-# pushed their per-package scratch tags. Rebuilds the per-EL yum images
-# (rpm-repo:latest-el8 / :latest-el9) from the full scratch-tag set.
-#
-# el8 and el9 run as SEPARATE matrix jobs (separate runners) so each runner
-# only assembles ONE multi-GB image on its own fresh disk -- avoiding the
-# runner-disk overflow that hit when both were built on one runner.
+# pushed their per-package scratch tags. Rebuilds the combined yum image
+# (rpm-repo:latest) from the full scratch-tag set.
 #
 # Caller wires it as a final job:
 #   publish:
@@ -23,15 +19,11 @@ permissions:
 
 jobs:
   publish:
-    name: Rebuild :latest-el${{ matrix.el }}
+    name: Rebuild and push rpm-repo:latest
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        el: ['8', '9']
     steps:
       # Aggressively reclaim runner disk (~30-40GB) before pulling tags and
-      # assembling a multi-GB image (the build context alone is several GB).
+      # assembling the multi-GB image.
       - name: Free up disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -50,7 +42,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Rebuild :latest-el${{ matrix.el }} from scratch tags
+      - name: Rebuild :latest from all scratch tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -59,5 +51,4 @@ jobs:
           git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
           chmod +x sync_repo.sh
-          # Build only this EL's image (separate runner per EL).
-          ./sync_repo.sh ${{ matrix.el }}
+          ./sync_repo.sh

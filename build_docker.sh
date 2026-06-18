@@ -48,7 +48,7 @@ echo "Target: EL${EL_VERSION}"
 
 # Pull the per-EL rpm-repo image (~half size, fits the runner disk).
 # Overridable via RPM_REPO_IMAGE so CI/ops can repoint without a submodule bump.
-RPM_REPO_IMAGE="${RPM_REPO_IMAGE:-ghcr.io/gemini-rtsw/rpm-repo:latest-el${EL_VERSION}}"
+RPM_REPO_IMAGE="${RPM_REPO_IMAGE:-ghcr.io/gemini-rtsw/rpm-repo:latest}"
 echo "Using rpm-repo image: ${RPM_REPO_IMAGE}"
 
 # Detect if we're in a CI pipeline
