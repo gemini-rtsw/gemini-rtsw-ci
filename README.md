@@ -56,7 +56,17 @@ Run from the **project repo root** (not from inside the submodule):
 ```bash
 ./gemini-rtsw-ci/build_rpm.sh          # Build RPM -> rpms/
 ./gemini-rtsw-ci/build_docker.sh       # Build dev Docker image
-./gemini-rtsw-ci/dev_environment.sh    # Enter dev container
+./gemini-rtsw-ci/dev_environment.sh    # Enter dev container (defaults to el8)
+```
+
+Images are EL-scoped (`el8-latest-devel`, `el9-latest-devel`). `dev_environment.sh`
+defaults to **el8**; pass `--el 9` for the EL9 image. Use `--prod` for the
+`el<N>-prod-devel` tag.
+
+```bash
+./gemini-rtsw-ci/dev_environment.sh           # el8-latest-devel (default)
+./gemini-rtsw-ci/dev_environment.sh --el 9    # el9-latest-devel
+./gemini-rtsw-ci/dev_environment.sh --prod    # el8-prod-devel
 ```
 
 ## How It Works
@@ -88,7 +98,9 @@ set -e
   yum repo) is rebuilt from all `rpm-*` tags. Per-package tags mean concurrent
   builds never clobber each other -- no publish lock needed. See the
   `gemini-rtsw-repo` README for details.
-- **Docker dev image** -- pushed to `ghcr.io/gemini-rtsw/<repo-name>:latest-devel`
+- **Docker dev image** -- pushed to `ghcr.io/gemini-rtsw/<repo-name>:el<N>-latest-devel`
+  (EL-scoped per matrix leg, e.g. `el8-latest-devel`, `el9-latest-devel`). Enter it
+  with `dev_environment.sh` (defaults to el8; `--el 9` for EL9).
 
 ---
 
