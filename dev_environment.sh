@@ -3,16 +3,22 @@
 # Ensure the script fails on any error
 set -e
 
-# Default tag suffix
-TAG_SUFFIX="latest-devel"
+# Default tag suffix and EL version. CI publishes EL-scoped tags
+# (el<N>-latest-devel / el<N>-prod-devel); default to el8 when --el is omitted.
+TAG_BASE="latest-devel"
+EL_VERSION="8"
 SKIP_PULL=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
     -p|--prod)
-      TAG_SUFFIX="prod-devel"
+      TAG_BASE="prod-devel"
       shift
+      ;;
+    --el)
+      EL_VERSION="$2"
+      shift 2
       ;;
     --no-pull|--skip-pull)
       SKIP_PULL=true
@@ -23,6 +29,9 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# CI tags images as el<N>-<base> (e.g. el8-latest-devel)
+TAG_SUFFIX="el${EL_VERSION}-${TAG_BASE}"
 
 # Check if we're in a git repository
 if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
