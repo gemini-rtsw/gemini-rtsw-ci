@@ -39,7 +39,7 @@ Then start the container — this pulls the latest pre-built dev image from GHCR
 
 ## 4. Modify code
 
-Edit source as needed, on the host or inside the container.
+Edit source as needed, on the host or inside the container. For example, in `softTCS_mk` (SCS), application source lives under `scs-cp-iocApp/src/` (e.g. `scs-cp-iocApp/src/chopControl.h`).
 
 ## 5. Modify schematics with TDCT (if applicable)
 
