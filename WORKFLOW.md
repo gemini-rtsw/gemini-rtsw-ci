@@ -31,14 +31,13 @@ On macOS, before entering, allow the container to reach your host's X server (ne
 xhost +
 ```
 
-Then start the container:
+Then start the container — this pulls the latest pre-built dev image from GHCR and drops you into a shell inside it, with the repo mounted at `/repo`:
 
 ```bash
-./gemini-rtsw-ci/build_docker.sh        # build the dev image (first time / after a Dockerfile change)
-./gemini-rtsw-ci/dev_environment.sh     # enter it (defaults to el8; --el 9 for EL9)
+./gemini-rtsw-ci/dev_environment.sh     # defaults to el8; --el 9 for EL9
 ```
 
-This drops you into a shell inside the container, with the repo mounted at `/repo`. Everything in steps 4-6 runs from there.
+Everything in steps 4-6 runs from there.
 
 ## 4. Modify code
 
