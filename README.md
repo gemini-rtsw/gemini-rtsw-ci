@@ -48,15 +48,25 @@ No tokens are needed for RPM access — the repo is served over plain HTTP; GHCR
 
 ## Local builds
 
-Prerequisites: Docker running, logged in to GHCR (`docker login ghcr.io` with a PAT that has `read:packages`). Run from the **project repo root**, not inside the submodule:
+Prerequisites: Docker running and logged in to GHCR. Run from the **project repo root**, not inside the submodule:
 
 ```bash
 ./gemini-rtsw-ci/build_rpm.sh                 # Build RPM -> rpms/
 ./gemini-rtsw-ci/build_docker.sh              # Build dev Docker image
 ./gemini-rtsw-ci/dev_environment.sh           # el8-latest-devel (default)
 ./gemini-rtsw-ci/dev_environment.sh --el 9    # el9-latest-devel
-./gemini-rtsw-ci/dev_environment.sh --prod    # el8-prod-devel
 ```
+
+### Logging in to GHCR
+
+Pulling the rpm-repo and dev images needs a GitHub [Personal Access Token (classic)](https://github.com/settings/tokens) with the `read:packages` scope:
+
+1. Go to **github.com/settings/tokens** → **Generate new token (classic)**.
+2. Check the **`read:packages`** scope and generate the token.
+3. Log in (use the token as the password):
+   ```bash
+   echo "<TOKEN>" | docker login ghcr.io -u <github-username> --password-stdin
+   ```
 
 ## Custom dependency setup
 
