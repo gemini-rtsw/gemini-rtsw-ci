@@ -52,7 +52,11 @@ tdct -cfg ./tdct.cfg
 
 ## 6. Build and test locally (`make`)
 
-Compile inside the container to check your change before committing — this is faster than a full RPM build.
+Compile inside the container to check your change before committing — this is faster than a full RPM build. From the repo root (e.g. `scs_cp/`):
+
+```bash
+make
+```
 
 ## 7. Commit and push
 
