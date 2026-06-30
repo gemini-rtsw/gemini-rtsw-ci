@@ -43,11 +43,11 @@ Edit source as needed, on the host or inside the container.
 
 ## 5. Modify schematics with TDCT (if applicable)
 
-TDCT is a GUI tool; run it against the `schematics/` directory in the repo:
+TDCT is a GUI tool; run it from the package's `Db/` directory, against the `tdct.cfg` found there. For example, in `softTCS_mk` (SCS):
 
 ```bash
-cd schematics
-tdct -cfg tdct.cfg
+cd scs-cp-iocApp/Db
+tdct -cfg ./tdct.cfg
 ```
 
 ## 6. Build and test locally (`make`)
