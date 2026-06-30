@@ -23,7 +23,7 @@ git checkout -b <your-branch-name>
 
 ## 3. Enter the Docker dev environment
 
-Steps 4-6 below (editing, schematics, and build checks) all happen **inside this container**, before you commit anything on the host. The container has the full EPICS toolchain already installed, so you don't need to set any of it up locally.
+Steps 5-6 below (TDCT and the build check) happen **inside this container** — it has the full EPICS toolchain already installed, so you don't need to set any of it up locally. Step 4 (editing code) can be done inside or outside the container.
 
 On macOS, before entering, allow the container to reach your host's X server (needed for TDCT's GUI in step 5):
 
@@ -37,11 +37,9 @@ Then start the container — this pulls the latest pre-built dev image from GHCR
 ./gemini-rtsw-ci/dev_environment.sh     # defaults to el8; --el 9 for EL9
 ```
 
-Everything in steps 4-6 runs from there.
-
 ## 4. Modify code
 
-Edit source as needed.
+Edit source as needed, on the host or inside the container.
 
 ## 5. Modify schematics with TDCT (if applicable)
 
