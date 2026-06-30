@@ -14,7 +14,7 @@ flowchart LR
     wf[".github/workflows/ci.yml"]
   end
   wf -->|"uses:"| reusable["gemini-rtsw-ci<br/>reusable workflows"]
-  reusable -->|"pull deps + publish RPM"| repo[("ghcr.io/...<br/>rpm-repo:latest")]
+  reusable <-->|"pull deps + publish RPM"| repo[("ghcr.io/...<br/>rpm-repo:latest")]
   reusable -->|"push dev image"| dev[("ghcr.io/...<br/>&lt;repo&gt;:el&lt;N&gt;-latest-devel")]
 ```
 
@@ -24,7 +24,7 @@ RPM dependencies are served by `ghcr.io/gemini-rtsw/rpm-repo:latest` — an ngin
 2. **Publishes** the resulting RPM via `upload-rpm.sh`: each package is pushed as a per-package tag `ghcr.io/gemini-rtsw/rpm-repo:rpm-<pkgname>`, and `rpm-repo:latest` is rebuilt from all `rpm-*` tags. Per-package tags mean concurrent builds never clobber each other.
 3. **Pushes a dev image** to `ghcr.io/gemini-rtsw/<repo-name>:el<N>-latest-devel`, EL-scoped per matrix leg (e.g. `el8-latest-devel`, `el9-latest-devel`).
 
-No tokens are needed for RPM access — the repo is served over plain HTTP; GHCR login is only to pull the container image. `GITHUB_TOKEN` covers everything in CI.
+You need to be logged in to GHCR to pull the container image; in CI `GITHUB_TOKEN` covers everything.
 
 The per-EL build legs run in parallel and each push only a per-package **scratch tag**; a single final `publish` job rebuilds `rpm-repo:latest` once all legs finish, so there is exactly one writer of `:latest` and no race:
 
@@ -36,13 +36,14 @@ sequenceDiagram
   participant Pub as publish.yml
 
   Note over CI: build-rpm
-  CI->>Repo: pull rpm-repo:latest (deps)
+  Repo->>CI: pull rpm-repo:latest (deps)
   CI->>CI: build RPM
   CI->>Repo: push scratch tag rpm-<pkg> (--tag-only)
-  Note over CI: build-docker (needs build-rpm)
+  Note over CI: build-docker (uses devel rpm)
   CI->>Dev: build + push :el<N>-latest-devel
   Note over Pub: after ALL EL legs finish
-  Pub->>Repo: rebuild rpm-repo:latest from all scratch tags
+  Repo->>Pub: pull all scratch tags
+  Pub->>Repo: push rebuilt rpm-repo:latest (yum container)
 ```
 
 ## Set up a new repo
