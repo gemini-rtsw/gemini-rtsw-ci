@@ -20,13 +20,12 @@ flowchart LR
 
 RPM dependencies are served by `ghcr.io/gemini-rtsw/rpm-repo:latest` — an nginx container hosting a yum repo of ~500 RPMs over plain HTTP. Each build:
 
-1. Pulls and starts the rpm-repo container on a Docker network, points `dnf` at it, builds, then cleans up.
-2. **Publishes** the resulting RPM via `upload-rpm.sh`: each package is pushed as a per-package tag `ghcr.io/gemini-rtsw/rpm-repo:rpm-<pkgname>`, and `rpm-repo:latest` is rebuilt from all `rpm-*` tags. Per-package tags mean concurrent builds never clobber each other.
-3. **Pushes a dev image** to `ghcr.io/gemini-rtsw/<repo-name>:el<N>-latest-devel`, EL-scoped per matrix leg (e.g. `el8-latest-devel`, `el9-latest-devel`).
+1. **Pull deps & build** — pull and start the rpm-repo container on a Docker network, point `dnf` at it, build the RPM, then clean up.
+2. **Push scratch tag** — push the built RPM as a per-package tag `ghcr.io/gemini-rtsw/rpm-repo:rpm-<pkgname>` via `upload-rpm.sh`. Per-package tags mean concurrent builds never clobber each other.
+3. **Push dev image** — push to `ghcr.io/gemini-rtsw/<repo-name>:el<N>-latest-devel`, EL-scoped per matrix leg (e.g. `el8-latest-devel`, `el9-latest-devel`).
+4. **Publish** — once all EL legs finish, a single `publish` job rebuilds `rpm-repo:latest` from every `rpm-*` scratch tag. One writer of `:latest`, no race.
 
 You need to be logged in to GHCR to pull the container image; in CI `GITHUB_TOKEN` covers everything.
-
-The per-EL build legs run in parallel and each push only a per-package **scratch tag**; a single final `publish` job rebuilds `rpm-repo:latest` once all legs finish, so there is exactly one writer of `:latest` and no race:
 
 ```mermaid
 sequenceDiagram
@@ -36,14 +35,14 @@ sequenceDiagram
   participant Pub as publish.yml
 
   Note over CI: build-rpm
-  Repo->>CI: pull rpm-repo:latest (yum container, deps)
-  CI->>CI: build RPM
-  CI->>Repo: push scratch tag rpm-<pkg> (--tag-only)
+  Repo->>CI: 1. pull rpm-repo:latest (yum container, deps)
+  CI->>CI: 1. build RPM
+  CI->>Repo: 2. push scratch tag rpm-<pkg> (--tag-only)
   Note over CI: build-docker (uses devel rpm)
-  CI->>Dev: build + push :el<N>-latest-devel
-  Note over Pub: after ALL EL legs finish
-  Repo->>Pub: pull all scratch tags
-  Pub->>Repo: push rebuilt rpm-repo:latest (yum container)
+  CI->>Dev: 3. build + push :el<N>-latest-devel
+  Note over Pub: 4. after ALL EL legs finish
+  Repo->>Pub: 4. pull all scratch tags
+  Pub->>Repo: 4. push rebuilt rpm-repo:latest (yum container)
 ```
 
 ## Set up a new repo
