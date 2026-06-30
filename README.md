@@ -133,12 +133,7 @@ dnf install <package-name>
 curl -O http://localhost:8080/rpm-repo/<rpm-filename>.rpm
 ```
 
-**To see what's available**, nginx has directory listing on, so browsing `http://localhost:8080/rpm-repo/` (or `curl`-ing it) shows the raw `.rpm` filenames directly. For the structured package list instead (name/version/etc., not just filenames), fetch the primary metadata file `repomd.xml` points to — it's gzipped XML, so `repomd.xml` alone won't show it:
-
-```bash
-PRIMARY=$(curl -s http://localhost:8080/rpm-repo/repodata/repomd.xml | grep -o 'repodata/[^"]*primary.xml.gz')
-curl -s "http://localhost:8080/rpm-repo/$PRIMARY" | gunzip | grep -o '<name>[^<]*' | sort -u
-```
+**To see what's available**, nginx has directory listing on, so browsing `http://localhost:8080/rpm-repo/` (or `curl`-ing it) shows the raw `.rpm` filenames directly.
 
 ## Custom dependency setup
 
