@@ -103,6 +103,38 @@ Pulling the rpm-repo and dev images needs a GitHub [Personal Access Token (class
    echo "<TOKEN>" | docker login ghcr.io -u <github-username> --password-stdin
    ```
 
+## Browsing the rpm-repo directly
+
+The rpm-repo image is a plain nginx server (port `8080`, path `/rpm-repo/`) — you can run it locally and hit it with `dnf` or `curl` without going through any of the build scripts.
+
+**Pull and run it:**
+```bash
+docker login ghcr.io   # see "Logging in to GHCR" above
+docker pull ghcr.io/gemini-rtsw/rpm-repo:latest
+docker run -d --name rpm-repo -p 8080:8080 ghcr.io/gemini-rtsw/rpm-repo:latest
+```
+
+**Point `dnf` at it** by adding a repo file:
+```bash
+sudo tee /etc/yum.repos.d/gemini-rtsw.repo <<'EOF'
+[gemini-rtsw]
+name=gemini-rtsw rpm-repo
+baseurl=http://localhost:8080/rpm-repo/
+enabled=1
+gpgcheck=0
+EOF
+
+dnf list available | grep <package-name>
+dnf install <package-name>
+```
+
+**Or just `curl` an RPM directly**, e.g. to grab a specific file without `dnf`:
+```bash
+curl -O http://localhost:8080/rpm-repo/<rpm-filename>.rpm
+```
+
+To see what's available, browse `http://localhost:8080/rpm-repo/` in a browser, or `curl http://localhost:8080/rpm-repo/repodata/repomd.xml` for the repo metadata.
+
 ## Custom dependency setup
 
 If your package has tricky dependencies (wrong versions, mixed repos), add a `custom-repo-setup.sh` in your repo root. It runs automatically before dependency resolution in both RPM and Docker builds; if absent, nothing happens.

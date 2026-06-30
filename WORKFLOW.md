@@ -68,6 +68,10 @@ git commit -m "<message>"
 git push -u origin <your-branch-name>
 ```
 
+Pushing to GitHub triggers the CI pipeline (`ci.yml`) for that branch/PR: it builds the RPM, publishes it as a scratch tag (`ghcr.io/gemini-rtsw/rpm-repo:rpm-<pkgname>-el<N>`), and pushes a dev image. See [README.md](README.md#how-the-pipeline-works) for the full pipeline flow.
+
+The built RPM is also uploaded as a **GitHub Actions artifact** on that workflow run (named `rpms-el<N>`) — to grab it without pulling from rpm-repo: open the run under the repo's **Actions** tab, and download `rpms-el<N>` from the **Artifacts** section at the bottom of the run summary.
+
 ## 8. Build the RPM locally
 
 From the **project repo root** on the host (not inside the submodule):
@@ -76,4 +80,4 @@ From the **project repo root** on the host (not inside the submodule):
 ./gemini-rtsw-ci/build_rpm.sh
 ```
 
-Produces the package RPM in `rpms/`. See [README.md](README.md#local-builds) for prerequisites (Docker running, logged in to GHCR).
+Produces the package RPM(s) in `rpms/` in the repo root — these are the same RPMs CI builds and publishes, just built and kept on your machine instead of pushed to the rpm-repo. See [README.md](README.md#local-builds) for prerequisites (Docker running, logged in to GHCR).
