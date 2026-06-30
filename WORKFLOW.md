@@ -21,32 +21,45 @@ git submodule update --init --recursive
 git checkout -b <your-branch-name>
 ```
 
-## 3. Modify code
+## 3. Enter the Docker dev environment
 
-Edit source as needed.
+Steps 4-6 below (editing, schematics, and build checks) all happen **inside this container**, before you commit anything on the host. The container has the full EPICS toolchain already installed, so you don't need to set any of it up locally.
 
-## 4. Modify schematics with TDCT (if applicable)
-
-TDCT is a GUI tool and runs **inside the Docker dev environment** (see step 7), against the `schematics/` directory in the repo.
-
-On macOS, before entering the dev container, allow the container to reach your host's X server:
+On macOS, before entering, allow the container to reach your host's X server (needed for TDCT's GUI in step 5):
 
 ```bash
 xhost +
 ```
 
-Then, inside the dev container:
+Then start the container:
+
+```bash
+./gemini-rtsw-ci/build_docker.sh        # build the dev image (first time / after a Dockerfile change)
+./gemini-rtsw-ci/dev_environment.sh     # enter it (defaults to el8; --el 9 for EL9)
+```
+
+This drops you into a shell inside the container, with the repo mounted at `/repo`. Everything in steps 4-6 runs from there.
+
+## 4. Modify code
+
+Edit source as needed.
+
+## 5. Modify schematics with TDCT (if applicable)
+
+TDCT is a GUI tool; run it against the `schematics/` directory in the repo:
 
 ```bash
 cd schematics
 tdct -cfg tdct.cfg
 ```
 
-## 5. Build and test locally (`make`)
+## 6. Build and test locally (`make`)
 
-Compile inside the dev environment to check your change before committing — this is faster than a full RPM/Docker build.
+Compile inside the container to check your change before committing — this is faster than a full RPM build.
 
-## 6. Commit and push
+## 7. Commit and push
+
+Run from the host (or from inside the container — both share the same mounted repo):
 
 ```bash
 git add <files>
@@ -54,21 +67,12 @@ git commit -m "<message>"
 git push -u origin <your-branch-name>
 ```
 
-## 7. Build the RPM locally
+## 8. Build the RPM locally
 
-From the **project repo root** (not inside the submodule):
+From the **project repo root** on the host (not inside the submodule):
 
 ```bash
 ./gemini-rtsw-ci/build_rpm.sh
 ```
 
-Produces the package RPM in `rpms/`.
-
-## 8. Build and enter the Docker dev environment locally
-
-```bash
-./gemini-rtsw-ci/build_docker.sh        # build the dev image
-./gemini-rtsw-ci/dev_environment.sh     # enter it (defaults to el8; --el 9 for EL9)
-```
-
-See [README.md](README.md#local-builds) for prerequisites (Docker running, logged in to GHCR).
+Produces the package RPM in `rpms/`. See [README.md](README.md#local-builds) for prerequisites (Docker running, logged in to GHCR).
