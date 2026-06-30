@@ -36,7 +36,7 @@ sequenceDiagram
   participant Pub as publish.yml
 
   Note over CI: build-rpm
-  Repo->>CI: pull rpm-repo:latest (deps)
+  Repo->>CI: pull rpm-repo:latest (yum container, deps)
   CI->>CI: build RPM
   CI->>Repo: push scratch tag rpm-<pkg> (--tag-only)
   Note over CI: build-docker (uses devel rpm)
