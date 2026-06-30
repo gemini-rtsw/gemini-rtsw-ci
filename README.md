@@ -2,6 +2,8 @@
 
 Shared CI scripts for building RPMs and Docker dev environments. Used as a git submodule in each project repo. On every push, the pipeline builds the package's RPM, publishes it to the shared rpm-repo, and pushes a Docker dev image to GHCR.
 
+For a step-by-step local dev workflow (clone, edit, schematics, build, commit), see [WORKFLOW.md](WORKFLOW.md).
+
 ## How the pipeline works
 
 Each project repo pins this repo as a submodule and calls its reusable workflows. Dependencies and published RPMs both flow through one shared `rpm-repo` image on GHCR; dev images are pushed per project.
