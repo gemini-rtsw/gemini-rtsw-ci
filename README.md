@@ -114,7 +114,13 @@ docker pull ghcr.io/gemini-rtsw/rpm-repo:latest
 docker run -d --name rpm-repo -p 8080:8080 ghcr.io/gemini-rtsw/rpm-repo:latest
 ```
 
-**Point `dnf` at it** by adding a repo file:
+**Point `dnf` at it temporarily**, without adding a repo file, using `--repofrompath`:
+```bash
+dnf --repofrompath gemini-rtsw,http://localhost:8080/rpm-repo/ --nogpgcheck list available --repo gemini-rtsw
+dnf --repofrompath gemini-rtsw,http://localhost:8080/rpm-repo/ --nogpgcheck install --repo gemini-rtsw <package-name>
+```
+
+**Or add a repo file** for a permanent setup:
 ```bash
 sudo tee /etc/yum.repos.d/gemini-rtsw.repo <<'EOF'
 [gemini-rtsw]
