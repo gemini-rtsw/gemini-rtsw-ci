@@ -4,6 +4,20 @@ Shared CI scripts for building RPMs and Docker dev environments. Used as a git s
 
 ## How the pipeline works
 
+Each project repo pins this repo as a submodule and calls its reusable workflows. Dependencies and published RPMs both flow through one shared `rpm-repo` image on GHCR; dev images are pushed per project.
+
+```mermaid
+flowchart LR
+  subgraph project["project repo"]
+    spec[".spec"]
+    sub["gemini-rtsw-ci<br/>(submodule)"]
+    wf[".github/workflows/ci.yml"]
+  end
+  wf -->|"uses:"| reusable["gemini-rtsw-ci<br/>reusable workflows"]
+  reusable -->|"pull deps + publish RPM"| repo[("ghcr.io/...<br/>rpm-repo:latest")]
+  reusable -->|"push dev image"| dev[("ghcr.io/...<br/>&lt;repo&gt;:el&lt;N&gt;-latest-devel")]
+```
+
 RPM dependencies are served by `ghcr.io/gemini-rtsw/rpm-repo:latest` — an nginx container hosting a yum repo of ~500 RPMs over plain HTTP. Each build:
 
 1. Pulls and starts the rpm-repo container on a Docker network, points `dnf` at it, builds, then cleans up.
@@ -11,6 +25,25 @@ RPM dependencies are served by `ghcr.io/gemini-rtsw/rpm-repo:latest` — an ngin
 3. **Pushes a dev image** to `ghcr.io/gemini-rtsw/<repo-name>:el<N>-latest-devel`, EL-scoped per matrix leg (e.g. `el8-latest-devel`, `el9-latest-devel`).
 
 No tokens are needed for RPM access — the repo is served over plain HTTP; GHCR login is only to pull the container image. `GITHUB_TOKEN` covers everything in CI.
+
+The per-EL build legs run in parallel and each push only a per-package **scratch tag**; a single final `publish` job rebuilds `rpm-repo:latest` once all legs finish, so there is exactly one writer of `:latest` and no race:
+
+```mermaid
+sequenceDiagram
+  participant CI as ci.yml (per EL leg)
+  participant Repo as rpm-repo (GHCR)
+  participant Dev as dev image (GHCR)
+  participant Pub as publish.yml
+
+  Note over CI: build-rpm
+  CI->>Repo: pull rpm-repo:latest (deps)
+  CI->>CI: build RPM
+  CI->>Repo: push scratch tag rpm-<pkg> (--tag-only)
+  Note over CI: build-docker (needs build-rpm)
+  CI->>Dev: build + push :el<N>-latest-devel
+  Note over Pub: after ALL EL legs finish
+  Pub->>Repo: rebuild rpm-repo:latest from all scratch tags
+```
 
 ## Set up a new repo
 
