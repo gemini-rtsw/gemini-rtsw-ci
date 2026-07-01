@@ -105,15 +105,12 @@ Pulling the rpm-repo and dev images needs a GitHub [Personal Access Token (class
 
 ## Downloading a built RPM from GitHub Actions
 
-Every CI run uploads the RPM(s) it built as a workflow artifact named `rpms-el<N>` (e.g. `rpms-el8`) — useful when you want the exact RPM from a specific branch/PR run without pulling from rpm-repo.
+Every CI run uploads the RPM(s) it built as a workflow artifact named `rpms-el<N>` (e.g. `rpms-el8`) — useful when you want the exact RPM from a specific branch/PR run without pulling from rpm-repo:
 
-**Via the web UI:** open the repo's **Actions** tab → the workflow run → scroll to **Artifacts** at the bottom of the run summary → download `rpms-el<N>`.
-
-**Via the `gh` CLI:**
-```bash
-gh run list --limit 5                       # find the run ID
-gh run download <run-id> -n rpms-el8        # downloads into ./rpms-el8/
-```
+1. Open the repo on github.com and click the **Actions** tab.
+2. Click the workflow run for your branch/PR.
+3. Scroll to the **Artifacts** section at the bottom of the run summary.
+4. Click `rpms-el<N>` to download a `.zip` containing the RPM(s).
 
 ## Browsing the rpm-repo directly
 
