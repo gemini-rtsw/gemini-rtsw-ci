@@ -103,6 +103,18 @@ Pulling the rpm-repo and dev images needs a GitHub [Personal Access Token (class
    echo "<TOKEN>" | docker login ghcr.io -u <github-username> --password-stdin
    ```
 
+## Downloading a built RPM from GitHub Actions
+
+Every CI run uploads the RPM(s) it built as a workflow artifact named `rpms-el<N>` (e.g. `rpms-el8`) — useful when you want the exact RPM from a specific branch/PR run without pulling from rpm-repo.
+
+**Via the web UI:** open the repo's **Actions** tab → the workflow run → scroll to **Artifacts** at the bottom of the run summary → download `rpms-el<N>`.
+
+**Via the `gh` CLI:**
+```bash
+gh run list --limit 5                       # find the run ID
+gh run download <run-id> -n rpms-el8        # downloads into ./rpms-el8/
+```
+
 ## Browsing the rpm-repo directly
 
 The rpm-repo image is a plain nginx server (port `8080`, path `/rpm-repo/`) — you can run it locally and hit it with `dnf` or `curl` without going through any of the build scripts.
