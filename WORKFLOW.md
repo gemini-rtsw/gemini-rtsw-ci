@@ -13,7 +13,7 @@ flowchart TD
     E --> F["6. Build & test (make)"]
     F -->|"not working yet"| D
   end
-  subgraph after["After you push"]
+  subgraph after["Build and deploy"]
     G["7. Commit & push"] --> H["CI builds + publishes RPM"]
   end
   B --> C
@@ -86,7 +86,7 @@ make
 
 Not working yet? Go back to step 4. Happy with it? Move on to committing.
 
-## After you push
+## Build and deploy
 
 ### 7. Commit and push
 
@@ -98,14 +98,7 @@ git push -u origin <your-branch-name>
 
 Pushing triggers CI (`ci.yml`) for that branch/PR: it builds the RPM, publishes it as a scratch tag (`ghcr.io/gemini-rtsw/rpm-repo:rpm-<pkgname>-el<N>`), and pushes a dev image. See [README.md](README.md#how-the-pipeline-works) for the full pipeline flow.
 
-### 8. Get the RPM CI built (optional)
-
-Two ways, without needing to build it yourself:
-
-- **From the rpm-repo** (published automatically) — see [README.md](README.md#browsing-the-rpm-repo-directly).
-- **From the GitHub Actions run** — see [README.md](README.md#downloading-a-built-rpm-from-github-actions) for the click-by-click steps.
-
-### 9. Build the RPM locally (optional)
+### 8. Build the RPM locally (optional)
 
 Skip CI entirely and build on your own machine — useful for a quick check before pushing, or if you don't want to wait on CI. From the **project repo root** on the host (not inside the submodule):
 
@@ -114,3 +107,10 @@ Skip CI entirely and build on your own machine — useful for a quick check befo
 ```
 
 Produces the package RPM(s) in `rpms/` in the repo root — the same RPMs CI builds, just kept on your machine instead of published. See [README.md](README.md#local-builds) for prerequisites (Docker running, logged in to GHCR).
+
+### 9. Get the RPM CI built (optional)
+
+Two ways, without needing to build it yourself:
+
+- **From the rpm-repo** (published automatically) — see [README.md](README.md#browsing-the-rpm-repo-directly).
+- **From the GitHub Actions run** — see [README.md](README.md#downloading-a-built-rpm-from-github-actions) for the click-by-click steps.
