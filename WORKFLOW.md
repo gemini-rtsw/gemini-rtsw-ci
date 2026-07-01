@@ -103,11 +103,7 @@ Pushing triggers CI (`ci.yml`) for that branch/PR: it builds the RPM, publishes 
 Two ways, without needing to build it yourself:
 
 - **From the rpm-repo** (published automatically) — see [README.md](README.md#browsing-the-rpm-repo-directly).
-- **From the GitHub Actions run**, via the web page:
-  1. Open the repo on github.com and click the **Actions** tab.
-  2. Click the workflow run for your branch/PR.
-  3. Scroll to the **Artifacts** section at the bottom of the run summary.
-  4. Click `rpms-el<N>` (e.g. `rpms-el8`) to download a `.zip` containing the RPM(s).
+- **From the GitHub Actions run** — open the run's **Actions** tab page and click `rpms-el<N>` under **Artifacts** to download.
 
 ### 9. Build the RPM locally (optional)
 
