@@ -152,9 +152,20 @@ if [[ -f "$CUSTOM_ENV_SCRIPT" ]]; then
     echo "Found custom environment setup script: $CUSTOM_ENV_SCRIPT"
     echo "Loading custom environment variables..."
 
-    # Source the custom script and capture environment variables
-    # This approach lets users do whatever they need in their script
-    CUSTOM_ENV_VARS=$(bash -c "source '$CUSTOM_ENV_SCRIPT' && env" | grep -v '^_=' | _filter_env_for_docker | tr '\n' ' ')
+    # Source the custom script and forward ONLY the variables it sets or
+    # changes (env diff), not the whole host environment. Forwarding the host
+    # env leaks macOS values like TMPDIR (which breaks the container's
+    # profile.d sourcing, so the gemsoft env never loads) and DISPLAY (which
+    # clobbers the host.docker.internal:0 that X11 forwarding sets, since
+    # these -e args come last on the docker command line).
+    CUSTOM_ENV_VARS=$(bash -c "
+        _b=\$(mktemp); _a=\$(mktemp)
+        env | sort > \"\$_b\"
+        source '$CUSTOM_ENV_SCRIPT' >/dev/null 2>&1
+        env | sort > \"\$_a\"
+        comm -13 \"\$_b\" \"\$_a\"
+        rm -f \"\$_b\" \"\$_a\"
+    " | grep -v '^_=' | _filter_env_for_docker | tr '\n' ' ')
 
     CUSTOM_ENV_ARGS="$CUSTOM_ENV_VARS"
     echo "Custom environment variables loaded"
