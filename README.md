@@ -66,10 +66,24 @@ sequenceDiagram
        branches: [main]
    jobs:
      build:
+       strategy:
+         fail-fast: false
+         matrix:
+           el: ['8', '9']   # trim to the ELs your package supports
        uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
        with:
          scripts_dir: gemini-rtsw-ci
+         el_version: ${{ matrix.el }}
+
+     # Rebuilds rpm-repo:latest ONCE after all EL legs have pushed their
+     # scratch tags. Without this job the RPM never lands in the served repo.
+     publish:
+       needs: build
+       uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
+       secrets: inherit
    ```
+   `el_version` defaults to **8** if omitted — an EL9-only package must pass it
+   explicitly (matrix `el: ['9']`), or the build targets the wrong EL.
 
 3. **Add a `.spec` file** in the repo root or `SPECS/`.
 
@@ -91,6 +105,10 @@ Prerequisites: Docker running and logged in to GHCR. Run from the **project repo
 ./gemini-rtsw-ci/dev_environment.sh           # el8-latest-devel (default)
 ./gemini-rtsw-ci/dev_environment.sh --el 9    # el9-latest-devel
 ```
+
+All three scripts accept `--el <8|9>` and **default to EL8** — for an EL9-only
+package (e.g. tcc) always pass `--el 9`, or the dev-image pull fails with
+`manifest unknown`.
 
 ### Logging in to GHCR
 
