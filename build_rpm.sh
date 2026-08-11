@@ -353,6 +353,13 @@ fi &&
         mkdir -p /work/rpms &&
         cp /root/rpmbuild/RPMS/$BUILD_ARCH/*.rpm /work/rpms/ &&
 
+        # Record the resolved version and commit for build_app_image.sh. The
+        # version is written by the same code that built the RPM, so an image
+        # tagged from it cannot disagree with the package -- which is the whole
+        # point of deploying a container by RPM.
+        printf "%s\n" "$PACKAGE_VERSION" > /work/rpms/.version &&
+        printf "%s\n" "${GIT_HASH:-nogit}" > /work/rpms/.githash &&
+
         # Verify the copy worked
         echo "Contents of /work/rpms:" &&
         ls -l /work/rpms/

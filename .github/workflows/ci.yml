@@ -33,6 +33,11 @@ on:
         required: false
         default: ''
         type: string
+      app_image:
+        description: "Path to a Dockerfile for this repo's APPLICATION image (not the dev image). Built and pushed tagged from the spec version. Empty = no app image."
+        required: false
+        default: ''
+        type: string
       register:
         description: "Push the RPM scratch tag to rpm-repo. Set false for PR/dev builds whose NVRA does not change between commits."
         required: false
@@ -103,6 +108,23 @@ jobs:
       - name: Verify RPM
         if: inputs.verify_cmd != ''
         run: ${{ inputs.verify_cmd }}
+
+      # Before the RPM is registered, deliberately: a published RPM whose unit
+      # pins an image that was never pushed installs cleanly and then fails at
+      # the next restart, on the deployed host, with nothing linking the two.
+      - name: Build and push application image
+        if: inputs.app_image != '' && github.event_name != 'pull_request'
+        run: |
+          chmod +x ${{ inputs.scripts_dir }}/build_app_image.sh
+          ${{ inputs.scripts_dir }}/build_app_image.sh --dockerfile "${{ inputs.app_image }}"
+
+      # On a pull request the image is built but never pushed, so a broken
+      # Dockerfile still fails the PR rather than only failing after merge.
+      - name: Build application image (no push)
+        if: inputs.app_image != '' && github.event_name == 'pull_request'
+        run: |
+          chmod +x ${{ inputs.scripts_dir }}/build_app_image.sh
+          ${{ inputs.scripts_dir }}/build_app_image.sh --dockerfile "${{ inputs.app_image }}" --no-push
 
       - name: Upload RPM artifacts
         uses: actions/upload-artifact@v4
