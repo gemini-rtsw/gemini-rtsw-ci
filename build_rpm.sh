@@ -12,20 +12,42 @@ RPM_REPO_NETWORK="rpm-net"
 # callers are unchanged; pass --el 9 (or EL_VERSION=9) to build for Rocky 9.
 EL_VERSION="${EL_VERSION:-8}"
 IS_PROD=false
+
+# Build profile. "epics" is the historical behaviour and stays the default, so
+# every existing caller is unchanged. "lightweight" is for packages that need
+# none of the EPICS toolchain -- no gemini-ade, no rpm-repo dependency
+# container, no EPEL/CRB, and no -devel subpackage requirement. Those packages
+# (e.g. a noarch package shipping only config and a systemd unit) spend the
+# whole build pulling a multi-GB image they never read.
+PROFILE="${PROFILE:-epics}"
+
+# Spec location, if it is neither ./*.spec nor SPECS/*.spec.
+SPEC_PATH="${SPEC_PATH:-}"
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --el) EL_VERSION="$2"; shift 2 ;;
         --el=*) EL_VERSION="${1#*=}"; shift ;;
+        --profile) PROFILE="$2"; shift 2 ;;
+        --profile=*) PROFILE="${1#*=}"; shift ;;
+        --spec) SPEC_PATH="$2"; shift 2 ;;
+        --spec=*) SPEC_PATH="${1#*=}"; shift ;;
         -p|--prod) IS_PROD=true; shift ;;
         *) shift ;;
     esac
 done
+case "$PROFILE" in
+    epics|lightweight) ;;
+    *) echo "ERROR: unsupported --profile $PROFILE (expected epics or lightweight)" >&2; exit 1 ;;
+esac
 case "$EL_VERSION" in
     8|9) ;;
     *) echo "ERROR: unsupported --el '$EL_VERSION' (expected 8 or 9)" >&2; exit 1 ;;
 esac
-BASE_IMAGE="rockylinux:${EL_VERSION}"
-echo "Target: EL${EL_VERSION} (base image ${BASE_IMAGE})"
+# BUILDER_IMAGE lets a package pin a slimmer or different base without another
+# submodule bump. Defaults to the per-EL Rocky image, as before.
+BASE_IMAGE="${BUILDER_IMAGE:-rockylinux:${EL_VERSION}}"
+echo "Target: EL${EL_VERSION} (base image ${BASE_IMAGE}, profile ${PROFILE})"
 
 # Pull the per-EL rpm-repo image (~half the size of the combined :latest, so
 # the runner disk doesn't overflow). Overridable via the RPM_REPO_IMAGE env
@@ -67,7 +89,12 @@ cleanup_rpm_repo() {
 trap cleanup_rpm_repo EXIT
 
 # Get package name from spec file, checking both root and SPECS directory
-SPEC_FILE=$(ls *.spec 2>/dev/null || ls SPECS/*.spec 2>/dev/null)
+if [ -n "$SPEC_PATH" ]; then
+    SPEC_FILE="$SPEC_PATH"
+    [ -f "$SPEC_FILE" ] || { echo "ERROR: --spec $SPEC_FILE not found" >&2; exit 1; }
+else
+    SPEC_FILE=$(ls *.spec 2>/dev/null || ls SPECS/*.spec 2>/dev/null)
+fi
 if [ -z "$SPEC_FILE" ]; then
     echo "No .spec file found in repository or SPECS directory"
     exit 1
@@ -123,18 +150,32 @@ echo "Using spec file: $SPEC_FILE"
 echo "Pulling ${BASE_IMAGE} base image..."
 docker pull "$BASE_IMAGE"
 
-# Start the rpm-repo container
-start_rpm_repo
+# Start the rpm-repo container. Only the epics profile installs anything from
+# it, and pulling it is the single most expensive step in the build.
+if [ "$PROFILE" = "epics" ]; then
+    start_rpm_repo
+    NETWORK_ARGS="--network $RPM_REPO_NETWORK"
+else
+    echo "Profile lightweight: skipping rpm-repo dependency container"
+    NETWORK_ARGS=""
+fi
 
 # Run the build in container
 echo "Running build in container..."
 docker run --rm -v $(pwd):/work -w /work \
-    --network "$RPM_REPO_NETWORK" \
+    $NETWORK_ARGS \
     -e GIT_HASH="$GIT_HASH" \
     -e GIT_BRANCH="$GIT_BRANCH" \
     -e EL_VERSION="$EL_VERSION" \
+    -e PROFILE="$PROFILE" \
+    -e SPEC_PATH="$SPEC_PATH" \
     "$BASE_IMAGE" \
     /bin/bash -c 'set -ex && \
+        # The lightweight profile installs only what rpmbuild itself needs. No
+        # rpm-repo, no EPEL/CRB, no ADE -- see --profile in this script.
+        if [ "$PROFILE" = "lightweight" ]; then \
+            dnf install -y rpm-build dnf-plugins-core git; \
+        else \
         # Configure RPM repository
         echo "[rpm-repo]
 name=RPM Repository
@@ -164,14 +205,20 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         source /etc/profile.d/ade.sh && \
 
         # Install minimal build requirements
-        dnf install -y rpm-build make gcc gcc-c++ re2c git && \
+        dnf install -y rpm-build make gcc gcc-c++ re2c git; \
+        fi && \
 
         # Mark /work as safe for git (avoids dubious ownership errors
         # when the mounted volume UID differs from the container user)
         git config --global --add safe.directory /work && \
 
         # Find the spec file
-        SPEC_FILE=$(ls *.spec 2>/dev/null || ls SPECS/*.spec 2>/dev/null) &&
+        if [ -n "$SPEC_PATH" ]; then
+    SPEC_FILE="$SPEC_PATH"
+    [ -f "$SPEC_FILE" ] || { echo "ERROR: --spec $SPEC_FILE not found" >&2; exit 1; }
+else
+    SPEC_FILE=$(ls *.spec 2>/dev/null || ls SPECS/*.spec 2>/dev/null)
+fi &&
         echo "Found spec file: $SPEC_FILE" &&
         if [ -z "$SPEC_FILE" ]; then
             echo "No .spec file found in repository or SPECS directory" &&
@@ -192,7 +239,9 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         #    NB: this whole script runs inside bash -c with SINGLE quotes, so
         #    NO single-quote characters are allowed anywhere below (even in
         #    comments) -- they would terminate the -c string.
-        if ! grep -qE "^%package devel" $SPEC_FILE; then
+        #    Only the epics profile builds a dev container, so only it needs
+        #    a -devel RPM to install into one.
+        if [ "$PROFILE" != "lightweight" ] && ! grep -qE "^%package devel" $SPEC_FILE; then
             echo "ERROR: spec has no %package devel section; dev container needs the -devel RPM." &&
             exit 1
         fi &&
@@ -212,6 +261,13 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
                 echo "Version contains macros, using default version 1.0" &&
                 PACKAGE_VERSION="1.0"
             fi
+        fi &&
+        # rpmspec expands macros, so a spec whose Version is defined by a
+        # %global (the version living in ONE place) resolves correctly instead
+        # of falling back to 1.0 and naming the tarball something the spec
+        # cannot find.
+        if [ "$PROFILE" = "lightweight" ]; then
+            PACKAGE_VERSION=$(rpmspec -q --queryformat "%{version}\n" $SPEC_FILE | head -1)
         fi &&
         echo "Package version: $PACKAGE_VERSION" &&
 

@@ -85,7 +85,24 @@ sequenceDiagram
    `el_version` defaults to **8** if omitted — an EL9-only package must pass it
    explicitly (matrix `el: ['9']`), or the build targets the wrong EL.
 
-3. **Add a `.spec` file** in the repo root or `SPECS/`.
+3. **Add a `.spec` file** in the repo root or `SPECS/` (or pass `spec_path`).
+
+   **Lightweight packages** — a package that needs none of the EPICS toolchain
+   (no `gemini-ade`, no cross-compile, no dev container) adds one line:
+
+   ```yaml
+   with:
+     scripts_dir: gemini-rtsw-ci
+     el_version: '9'
+     profile: lightweight          # the whole signal
+     verify_cmd: ./packaging/verify-rpm.sh   # optional package-specific checks
+   ```
+
+   That skips the rpm-repo dependency container, EPEL/CRB, `gemini-ade`, the
+   `-devel` subpackage requirement and the `build-docker` job — the parts a
+   config-only or noarch package pays for and never reads. `profile` defaults to
+   `epics`, so existing callers are unchanged. `builder_image` overrides the
+   base image if `rockylinux:<el>` is not what you want.
 
 4. **Grant the repo Write access to `rpm-repo`** (required — the build reads dependencies *and* publishes its RPM):
    - Open **github.com/orgs/gemini-rtsw/packages/container/rpm-repo/settings**

@@ -18,6 +18,26 @@ on:
         required: false
         default: '8'
         type: string
+      profile:
+        description: "Build profile: epics (default, unchanged) or lightweight (no gemini-ade, no rpm-repo dep container, no dev image)"
+        required: false
+        default: 'epics'
+        type: string
+      builder_image:
+        description: 'Override the build base image (default rockylinux:<el_version>)'
+        required: false
+        default: ''
+        type: string
+      spec_path:
+        description: 'Spec file path, if it is neither ./*.spec nor SPECS/*.spec'
+        required: false
+        default: ''
+        type: string
+      verify_cmd:
+        description: 'Command run after the build, from the repo root, with the RPMs in rpms/'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -38,7 +58,10 @@ jobs:
       # pulling the per-EL rpm-repo image fills the default runner '/' and the
       # build dies with "No space left on device" (dnf dep install, ld link, or
       # the multi-GB build context).
+      # Only the epics profile pulls the multi-GB rpm-repo image; reclaiming
+      # 30-40GB takes minutes a lightweight build has no reason to spend.
       - name: Free up disk space
+        if: inputs.profile != 'lightweight'
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -57,6 +80,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build RPM
+        env:
+          BUILDER_IMAGE: ${{ inputs.builder_image }}
+          SPEC_PATH: ${{ inputs.spec_path }}
+          PROFILE: ${{ inputs.profile }}
         run: |
           chmod +x ${{ inputs.scripts_dir }}/build_rpm.sh
           if [ "${{ inputs.is_prod }}" = "true" ]; then
@@ -64,6 +91,13 @@ jobs:
           else
             ${{ inputs.scripts_dir }}/build_rpm.sh --el ${{ inputs.el_version }}
           fi
+
+      # Package-specific checks the generic build cannot know about -- e.g. that
+      # a unit is pinned to the right image, or that an upgrade preserves
+      # /etc/sysconfig. Skipped entirely when unset.
+      - name: Verify RPM
+        if: inputs.verify_cmd != ''
+        run: ${{ inputs.verify_cmd }}
 
       - name: Upload RPM artifacts
         uses: actions/upload-artifact@v4
@@ -89,10 +123,13 @@ jobs:
           chmod +x upload-rpm.sh
           ./upload-rpm.sh --tag-only ../rpms/*.rpm
 
+  # Skipped for lightweight packages: the dev container exists to give an EPICS
+  # developer a toolchain, and a package with no C build has no use for one.
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
     needs: build-rpm
+    if: inputs.profile != 'lightweight' 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
