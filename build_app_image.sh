@@ -22,7 +22,11 @@
 set -euo pipefail
 
 DOCKERFILE="Dockerfile"
-PLATFORM="${APP_IMAGE_PLATFORM:-linux/amd64}"
+# Empty by default: a Dockerfile that needs a specific platform pins it itself
+# with FROM --platform=..., and passing --platform as well breaks the classic
+# builder ("does not provide the specified platform"). Set only when the caller
+# genuinely wants to override the Dockerfile.
+PLATFORM="${APP_IMAGE_PLATFORM:-}"
 IMAGE="${APP_IMAGE:-}"
 PUSH=1
 
@@ -71,9 +75,11 @@ IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')   # registries reject upperc
 # :latest               convenience only; never pin it in a unit
 TAGS="-t ${IMAGE}:${VERSION} -t ${IMAGE}:${VERSION}-git${GIT_HASH} -t ${IMAGE}:latest"
 
-echo "Building application image ${IMAGE}:${VERSION} (${PLATFORM}) from ${DOCKERFILE}"
+PLATFORM_ARG=""
+[ -n "$PLATFORM" ] && PLATFORM_ARG="--platform $PLATFORM"
+echo "Building application image ${IMAGE}:${VERSION} from ${DOCKERFILE} ${PLATFORM:+($PLATFORM)}"
 # shellcheck disable=SC2086
-docker build --platform "$PLATFORM" -f "$DOCKERFILE" $TAGS .
+docker build $PLATFORM_ARG -f "$DOCKERFILE" $TAGS .
 
 if [ "$PUSH" -eq 1 ]; then
     for t in "${VERSION}" "${VERSION}-git${GIT_HASH}" latest; do
