@@ -122,6 +122,37 @@ sequenceDiagram
    RPM registers, so a published RPM can never pin an image that does not exist.
    On a pull request it is built but not pushed.
 
+   **Host requirement — the RPM's unit pulls as root.** A systemd unit runs
+   `docker pull` as root, so *root* needs read access to the image, not the
+   installing user. Easiest is to make the package **public** (repo → Packages →
+   visibility); then nothing needs a credential and unattended reboots pull
+   correctly.
+
+   Otherwise give root the credential once. With sudo rights for docker:
+
+   ```bash
+   echo "<PAT>" | sudo -H docker login ghcr.io -u <user> --password-stdin
+   ```
+
+   `-H` forces `HOME=/root` so it lands in `/root/.docker/config.json`; without
+   it sudo may keep your `HOME`, report success, and the unit still fails.
+
+   If sudoers does not allow `docker login` but you are in the `docker` group
+   (which is root-equivalent — the daemon runs as root):
+
+   ```bash
+   docker login ghcr.io -u <user> --password-stdin        # no sudo needed
+   docker run --rm -v /root:/r -v "$HOME/.docker/config.json":/c:ro alpine \
+     sh -c 'mkdir -p /r/.docker && cp /c /r/.docker/config.json'
+   ```
+
+   Stopgap: `docker pull <image>:<version>` as any docker-group user. Same
+   daemon, same image store, so the unit's pull becomes a no-op — but it must be
+   repeated on every version bump, so it is not a deployment strategy.
+
+   The unit should keep `ExecStartPre=-/usr/bin/docker pull` (leading `-`) so a
+   registry outage cannot stop a working local image from starting.
+
 4. **Grant the repo Write access to `rpm-repo`** (required — the build reads dependencies *and* publishes its RPM):
    - Open **github.com/orgs/gemini-rtsw/packages/container/rpm-repo/settings**
    - Under **Manage Actions access** → **Add Repository**, add the new repo, role **Write**.
