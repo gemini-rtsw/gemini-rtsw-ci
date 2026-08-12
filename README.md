@@ -87,26 +87,49 @@ sequenceDiagram
 
 3. **Add a `.spec` file** in the repo root or `SPECS/` (or pass `spec_path`).
 
-   **Lightweight / non-EPICS packages** — a package that needs no EPICS
-   toolchain, and optionally ships a container instead of (or as well as) an
-   RPM:
+   **Lightweight / non-EPICS packages.** A package needing no EPICS toolchain,
+   optionally shipping a container instead of (or as well as) an RPM. This is a
+   complete `.github/workflows/ci.yml` — the options are inputs to the `build`
+   job, not spec macros:
 
    ```yaml
-   with:
-     scripts_dir: gemini-rtsw-ci
-     el_version: '9'
-     profile: lightweight                  # no gemini-ade, no rpm-repo deps, no dev image
-     spec_path: packaging/foo.spec         # if not ./*.spec or SPECS/*.spec
-     app_image: Dockerfile                 # build+push this repo's runtime image
-     verify_cmd: ./packaging/verify.sh     # package-specific checks, optional
+   name: Build
+   on:
+     push:
+       branches: [main]
+     pull_request:
+       branches: [main]
+   jobs:
+     build:
+       uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
+       secrets: inherit
+       with:
+         scripts_dir: gemini-rtsw-ci
+         el_version: '9'                      # no matrix: one EL is enough
+         profile: lightweight                 # no gemini-ade, no rpm-repo deps, no dev image
+         spec_path: packaging/foo.spec        # only if not ./*.spec or SPECS/*.spec
+         app_image: Dockerfile                # only if this repo ships a container
+         verify_cmd: ./packaging/verify.sh    # optional package-specific checks
+         builder_image: rockylinux:9.3        # optional; default rockylinux:<el_version>
+
+     publish:
+       needs: build
+       uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
+       secrets: inherit
    ```
 
-   All optional; omit them and the build is unchanged. `builder_image` overrides
-   the base if `rockylinux:<el>` is not what you want.
+   Every input above is optional except `scripts_dir`. Omit them all and you get
+   the standard EPICS build. `builder_image` is worth setting only to pin a
+   patch release (`rockylinux:9.3`) so a moving base cannot change your build,
+   or to use a different distro entirely.
+
+   Nothing goes in the spec — the spec is just the package. The one thing the
+   pipeline reads from it is the version, which is where the image tag comes
+   from (below).
 
    **`app_image` is not `build_docker.sh`.** That builds a *developer* container
    (toolchain + `-devel` RPMs) for `dev_environment.sh`. `app_image` builds the
-   container the repo *ships*.
+   container the repo *ships* to production.
 
    **Image tags come from the spec, never from an argument:**
 
