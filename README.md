@@ -82,99 +82,23 @@ sequenceDiagram
        uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
        secrets: inherit
    ```
+   **Lightweight / non-EPICS packages** add these under `build:` → `with:`.
+   That is the only difference — all optional, all defaulting to the standard
+   EPICS build:
+
+   ```yaml
+         profile: lightweight                 # no gemini-ade, no rpm-repo deps, no dev image
+         el_version: '9'                      # and drop the matrix; one EL is enough
+         spec_path: packaging/foo.spec        # if not ./*.spec or SPECS/*.spec
+         app_image: Dockerfile                # if this repo ships a container
+         verify_cmd: ./packaging/verify.sh    # package-specific checks
+         builder_image: rockylinux:9.3        # pin the base; default rockylinux:<el_version>
+   ```
+
    `el_version` defaults to **8** if omitted — an EL9-only package must pass it
    explicitly (matrix `el: ['9']`), or the build targets the wrong EL.
 
-3. **Add a `.spec` file** in the repo root or `SPECS/` (or pass `spec_path`).
-
-   **Lightweight / non-EPICS packages.** A package needing no EPICS toolchain,
-   optionally shipping a container instead of (or as well as) an RPM. This is a
-   complete `.github/workflows/ci.yml` — the options are inputs to the `build`
-   job, not spec macros:
-
-   ```yaml
-   name: Build
-   on:
-     push:
-       branches: [main]
-     pull_request:
-       branches: [main]
-   jobs:
-     build:
-       uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
-       secrets: inherit
-       with:
-         scripts_dir: gemini-rtsw-ci
-         el_version: '9'                      # no matrix: one EL is enough
-         profile: lightweight                 # no gemini-ade, no rpm-repo deps, no dev image
-         spec_path: packaging/foo.spec        # only if not ./*.spec or SPECS/*.spec
-         app_image: Dockerfile                # only if this repo ships a container
-         verify_cmd: ./packaging/verify.sh    # optional package-specific checks
-         builder_image: rockylinux:9.3        # optional; default rockylinux:<el_version>
-
-     publish:
-       needs: build
-       uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
-       secrets: inherit
-   ```
-
-   Every input above is optional except `scripts_dir`. Omit them all and you get
-   the standard EPICS build. `builder_image` is worth setting only to pin a
-   patch release (`rockylinux:9.3`) so a moving base cannot change your build,
-   or to use a different distro entirely.
-
-   Nothing goes in the spec — the spec is just the package. The one thing the
-   pipeline reads from it is the version, which is where the image tag comes
-   from (below).
-
-   **`app_image` is not `build_docker.sh`.** That builds a *developer* container
-   (toolchain + `-devel` RPMs) for `dev_environment.sh`. `app_image` builds the
-   container the repo *ships* to production.
-
-   **Image tags come from the spec, never from an argument:**
-
-   ```
-   ghcr.io/gemini-rtsw/<repo>:<version>              # pin this in a unit
-   ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR
-   ghcr.io/gemini-rtsw/<repo>:latest
-   ```
-
-   `build_rpm.sh` records the version it resolved; `build_app_image.sh` reads it.
-   So an RPM can pin the exact container a host runs — `rpm -q` shows what is
-   deployed, `dnf downgrade` rolls it back. The image is pushed **before** the
-   RPM registers, so a published RPM can never pin an image that does not exist.
-   On a pull request it is built but not pushed.
-
-   **Host requirement — the RPM's unit pulls as root.** A systemd unit runs
-   `docker pull` as root, so *root* needs read access to the image, not the
-   installing user. Easiest is to make the package **public** (repo → Packages →
-   visibility); then nothing needs a credential and unattended reboots pull
-   correctly.
-
-   Otherwise give root the credential once. With sudo rights for docker:
-
-   ```bash
-   echo "<PAT>" | sudo -H docker login ghcr.io -u <user> --password-stdin
-   ```
-
-   `-H` forces `HOME=/root` so it lands in `/root/.docker/config.json`; without
-   it sudo may keep your `HOME`, report success, and the unit still fails.
-
-   If sudoers does not allow `docker login` but you are in the `docker` group
-   (which is root-equivalent — the daemon runs as root):
-
-   ```bash
-   docker login ghcr.io -u <user> --password-stdin        # no sudo needed
-   docker run --rm -v /root:/r -v "$HOME/.docker/config.json":/c:ro alpine \
-     sh -c 'mkdir -p /r/.docker && cp /c /r/.docker/config.json'
-   ```
-
-   Stopgap: `docker pull <image>:<version>` as any docker-group user. Same
-   daemon, same image store, so the unit's pull becomes a no-op — but it must be
-   repeated on every version bump, so it is not a deployment strategy.
-
-   The unit should keep `ExecStartPre=-/usr/bin/docker pull` (leading `-`) so a
-   registry outage cannot stop a working local image from starting.
+3. **Add a `.spec` file** in the repo root or `SPECS/` (or set `spec_path`).
 
 4. **Grant the repo Write access to `rpm-repo`** (required — the build reads dependencies *and* publishes its RPM):
    - Open **github.com/orgs/gemini-rtsw/packages/container/rpm-repo/settings**
@@ -183,6 +107,57 @@ sequenceDiagram
 5. **Push.** Common failures if step 4 is missed:
    - `docker: ... denied` pulling `rpm-repo:latest` — no read access.
    - `denied: permission_denied: write_package` at publish — has read but not write.
+
+## Shipping a container by RPM
+
+`app_image` is not `build_docker.sh`. That builds a *developer* container
+(toolchain + `-devel` RPMs) for `dev_environment.sh`. `app_image` builds the
+container the repo **ships**.
+
+Tags come from the spec, never from an argument:
+
+```
+ghcr.io/gemini-rtsw/<repo>:<version>              # pin this in a unit
+ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR
+ghcr.io/gemini-rtsw/<repo>:latest
+```
+
+`build_rpm.sh` records the version it resolved and `build_app_image.sh` reads
+it, so an RPM can pin the exact container a host runs — `rpm -q` shows what is
+deployed, `dnf downgrade` rolls it back. The image is pushed **before** the RPM
+registers, so a published RPM can never pin an image that does not exist. On a
+pull request it is built but not pushed.
+
+**Host requirement — the RPM's unit pulls as root.** A systemd unit runs
+`docker pull` as root, so *root* needs read access to the image, not the
+installing user. Easiest is to make the package **public** (repo → Packages →
+visibility); then nothing needs a credential and unattended reboots pull
+correctly.
+
+Otherwise give root the credential once. With sudo rights for docker:
+
+```bash
+echo "<PAT>" | sudo -H docker login ghcr.io -u <user> --password-stdin
+```
+
+`-H` forces `HOME=/root` so it lands in `/root/.docker/config.json`; without
+it sudo may keep your `HOME`, report success, and the unit still fails.
+
+If sudoers does not allow `docker login` but you are in the `docker` group
+(which is root-equivalent — the daemon runs as root):
+
+```bash
+docker login ghcr.io -u <user> --password-stdin        # no sudo needed
+docker run --rm -v /root:/r -v "$HOME/.docker/config.json":/c:ro alpine \
+  sh -c 'mkdir -p /r/.docker && cp /c /r/.docker/config.json'
+```
+
+Stopgap: `docker pull <image>:<version>` as any docker-group user. Same
+daemon, same image store, so the unit's pull becomes a no-op — but it must be
+repeated on every version bump, so it is not a deployment strategy.
+
+The unit should keep `ExecStartPre=-/usr/bin/docker pull` (leading `-`) so a
+registry outage cannot stop a working local image from starting.
 
 ## Local builds
 
