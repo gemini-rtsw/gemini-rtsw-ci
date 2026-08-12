@@ -87,22 +87,40 @@ sequenceDiagram
 
 3. **Add a `.spec` file** in the repo root or `SPECS/` (or pass `spec_path`).
 
-   **Lightweight packages** — a package that needs none of the EPICS toolchain
-   (no `gemini-ade`, no cross-compile, no dev container) adds one line:
+   **Lightweight / non-EPICS packages** — a package that needs no EPICS
+   toolchain, and optionally ships a container instead of (or as well as) an
+   RPM:
 
    ```yaml
    with:
      scripts_dir: gemini-rtsw-ci
      el_version: '9'
-     profile: lightweight          # the whole signal
-     verify_cmd: ./packaging/verify-rpm.sh   # optional package-specific checks
+     profile: lightweight                  # no gemini-ade, no rpm-repo deps, no dev image
+     spec_path: packaging/foo.spec         # if not ./*.spec or SPECS/*.spec
+     app_image: Dockerfile                 # build+push this repo's runtime image
+     verify_cmd: ./packaging/verify.sh     # package-specific checks, optional
    ```
 
-   That skips the rpm-repo dependency container, EPEL/CRB, `gemini-ade`, the
-   `-devel` subpackage requirement and the `build-docker` job — the parts a
-   config-only or noarch package pays for and never reads. `profile` defaults to
-   `epics`, so existing callers are unchanged. `builder_image` overrides the
-   base image if `rockylinux:<el>` is not what you want.
+   All optional; omit them and the build is unchanged. `builder_image` overrides
+   the base if `rockylinux:<el>` is not what you want.
+
+   **`app_image` is not `build_docker.sh`.** That builds a *developer* container
+   (toolchain + `-devel` RPMs) for `dev_environment.sh`. `app_image` builds the
+   container the repo *ships*.
+
+   **Image tags come from the spec, never from an argument:**
+
+   ```
+   ghcr.io/gemini-rtsw/<repo>:<version>              # pin this in a unit
+   ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR
+   ghcr.io/gemini-rtsw/<repo>:latest
+   ```
+
+   `build_rpm.sh` records the version it resolved; `build_app_image.sh` reads it.
+   So an RPM can pin the exact container a host runs — `rpm -q` shows what is
+   deployed, `dnf downgrade` rolls it back. The image is pushed **before** the
+   RPM registers, so a published RPM can never pin an image that does not exist.
+   On a pull request it is built but not pushed.
 
 4. **Grant the repo Write access to `rpm-repo`** (required — the build reads dependencies *and* publishes its RPM):
    - Open **github.com/orgs/gemini-rtsw/packages/container/rpm-repo/settings**
@@ -118,6 +136,8 @@ Prerequisites: Docker running and logged in to GHCR. Run from the **project repo
 
 ```bash
 ./gemini-rtsw-ci/build_rpm.sh                 # Build RPM -> rpms/
+./gemini-rtsw-ci/build_rpm.sh --profile lightweight --spec packaging/foo.spec
+./gemini-rtsw-ci/build_app_image.sh --no-push # Build the runtime image (after build_rpm.sh)
 ./gemini-rtsw-ci/build_docker.sh              # Build dev Docker image
 ./gemini-rtsw-ci/dev_environment.sh           # el8-latest-devel (default)
 ./gemini-rtsw-ci/dev_environment.sh --el 9    # el9-latest-devel
