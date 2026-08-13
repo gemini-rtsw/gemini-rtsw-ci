@@ -378,6 +378,16 @@ docker run --rm -v $(pwd):/work -w /work \
     -e SPEC_PATH="$SPEC_PATH" \
     "$BUILDER_TAG" \
     /bin/bash -c 'set -ex && \
+        # Restore the ADE environment (TDCT, EPICS_HOST_ARCH, GEM_*). It used to
+        # be present in the rpmbuild environment for free, because the dependency
+        # preamble and rpmbuild ran in ONE shell. The stages are separate
+        # containers now and bash -c is non-login, so profile.d is never read --
+        # and a spec whose %build does not source the profile itself (vmi5588,
+        # for one) then builds with an empty $TDCT and fails generating its .db.
+        if [ "$PROFILE" != "lightweight" ] && [ -f /etc/profile.d/ade.sh ]; then \
+            source /etc/profile.d/ade.sh; \
+        fi && \
+
         # Find the spec file
         if [ -n "$SPEC_PATH" ]; then
     SPEC_FILE="$SPEC_PATH"
