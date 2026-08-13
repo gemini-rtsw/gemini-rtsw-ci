@@ -38,11 +38,6 @@ on:
         required: false
         default: ''
         type: string
-      register:
-        description: "Push the RPM scratch tag to rpm-repo. Set false for PR/dev builds whose NVRA does not change between commits."
-        required: false
-        default: true
-        type: boolean
       verify_cmd:
         description: 'Command run after the build, from the repo root, with the RPMs in rpms/'
         required: false
@@ -146,12 +141,7 @@ jobs:
           name: rpms-el${{ inputs.el_version }}
           path: rpms/*.rpm
 
-      # A package whose NVRA is fixed by its spec (rather than carrying a git
-      # hash) produces the SAME tag on every commit, so an unreleased dev build
-      # would overwrite the released one and the next publish would ship it.
-      # Such repos pass register: false on ordinary CI and true only on release.
       - name: Push RPM scratch tag (no :latest rebuild)
-        if: inputs.register
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
