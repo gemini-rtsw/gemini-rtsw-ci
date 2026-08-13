@@ -3,6 +3,24 @@
 # Ensure script fails on any error
 set -e
 
+# Build the RPM(s) AND the dev image from ONE container environment.
+#
+# The build environment is created once (stage 1), snapshotted with
+# `docker commit`, then reused to build the RPM (stage 2) and to produce the
+# published dev image (stage 3). Previously the environment was built twice --
+# once here from the spec BuildRequires, and once in a separate build-docker job
+# from a Dockerfile that re-resolved everything through the -devel RPM runtime
+# Requires. That second path could not see BuildRequires at all, so a package
+# whose -devel had no epics deps got a dev image with no EPICS in it, and
+# `make` inside it failed on a missing RULES_TOP.
+#
+# Why run+commit instead of `docker build`: the dependency repo is served by a
+# container on a user-defined Docker network, and BuildKit cannot attach a build
+# to one. `docker build --network` therefore needs DOCKER_BUILDKIT=0, i.e. the
+# deprecated legacy builder. `docker run --network` has no such limitation, and
+# committing the container we actually built in guarantees the published image
+# IS the build environment rather than a reconstruction of it.
+
 # RPM repo container settings. RPM_REPO_IMAGE is resolved AFTER arg parsing
 # (it depends on EL_VERSION); see below.
 RPM_REPO_CONTAINER="rpm-repo"
@@ -23,6 +41,10 @@ PROFILE="${PROFILE:-epics}"
 
 # Spec location, if it is neither ./*.spec nor SPECS/*.spec.
 SPEC_PATH="${SPEC_PATH:-}"
+
+# Suffix appended to the published dev image tags. Set to e.g. "-test" to try a
+# pipeline change without overwriting a repo real :el<N>-latest-devel image.
+DEV_IMAGE_SUFFIX="${DEV_IMAGE_SUFFIX:-}"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -80,13 +102,19 @@ start_rpm_repo() {
     echo "Warning: rpm-repo may not be ready, continuing anyway"
 }
 
-cleanup_rpm_repo() {
-    echo "Cleaning up rpm-repo container and network..."
+# Named build containers, removed on exit alongside the repo container. They are
+# NOT run with --rm because `docker commit` needs the stopped container.
+ENV_CONTAINER="gem-build-env-$$"
+DEV_CONTAINER="gem-build-dev-$$"
+
+cleanup_containers() {
+    echo "Cleaning up build containers, rpm-repo container and network..."
+    docker rm -f "$ENV_CONTAINER" "$DEV_CONTAINER" 2>/dev/null || true
     docker rm -f "$RPM_REPO_CONTAINER" 2>/dev/null || true
     docker network rm "$RPM_REPO_NETWORK" 2>/dev/null || true
 }
 
-trap cleanup_rpm_repo EXIT
+trap cleanup_containers EXIT
 
 # Get package name from spec file, checking both root and SPECS directory
 if [ -n "$SPEC_PATH" ]; then
@@ -146,6 +174,33 @@ echo "Building package: $PACKAGE_NAME"
 echo "Package version: $PACKAGE_VERSION"
 echo "Using spec file: $SPEC_FILE"
 
+# --- Image names -----------------------------------------------------------
+# Local-only tag for the committed build environment. Docker requires lowercase
+# repository names and several packages are camelCase (gemUtil, enetPLC5).
+LOWER_NAME=$(echo "$PACKAGE_NAME" | tr '[:upper:]' '[:lower:]')
+BUILDER_TAG="gem-builder-${LOWER_NAME}:el${EL_VERSION}"
+
+# Published dev image name, resolved exactly as the old build_docker.sh did.
+if [ -n "$GITHUB_ACTIONS" ]; then
+    REGISTRY_IMAGE="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+else
+    REMOTE_URL=$(git config --get remote.origin.url || true)
+    if echo "$REMOTE_URL" | grep -q "github.com"; then
+        GITHUB_PATH=$(echo "$REMOTE_URL" | sed -E 's#^(https://github\.com/|git@github\.com:)(.*)\.git$#\2#')
+        REGISTRY_IMAGE="ghcr.io/$(echo "$GITHUB_PATH" | tr '[:upper:]' '[:lower:]')"
+    else
+        REGISTRY_IMAGE="local/${LOWER_NAME}"
+        echo "Warning: Could not determine registry URL, using default: ${REGISTRY_IMAGE}"
+    fi
+fi
+if [ "$IS_PROD" = true ]; then
+    DEV_TAG="${REGISTRY_IMAGE}:el${EL_VERSION}-prod-devel${DEV_IMAGE_SUFFIX}"
+    ALT_TAG="${REGISTRY_IMAGE}:el${EL_VERSION}-prod${DEV_IMAGE_SUFFIX}"
+else
+    DEV_TAG="${REGISTRY_IMAGE}:el${EL_VERSION}-latest-devel${DEV_IMAGE_SUFFIX}"
+    ALT_TAG="${REGISTRY_IMAGE}:el${EL_VERSION}-latest${DEV_IMAGE_SUFFIX}"
+fi
+
 # Pull the base image
 echo "Pulling ${BASE_IMAGE} base image..."
 docker pull "$BASE_IMAGE"
@@ -160,9 +215,13 @@ else
     NETWORK_ARGS=""
 fi
 
-# Run the build in container
-echo "Running build in container..."
-docker run --rm -v $(pwd):/work -w /work \
+# ===========================================================================
+# STAGE 1 -- build the environment, then snapshot it.
+# Everything here used to be the first half of one giant `docker run`. The
+# steps and their order are unchanged; only the container lifetime differs.
+# ===========================================================================
+echo "=== Stage 1/3: building the build environment ==="
+docker run --name "$ENV_CONTAINER" -v $(pwd):/work -w /work \
     $NETWORK_ARGS \
     -e GIT_HASH="$GIT_HASH" \
     -e GIT_BRANCH="$GIT_BRANCH" \
@@ -209,7 +268,8 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
         fi && \
 
         # Mark /work as safe for git (avoids dubious ownership errors
-        # when the mounted volume UID differs from the container user)
+        # when the mounted volume UID differs from the container user).
+        # This writes /root/.gitconfig, so it persists into the commit.
         git config --global --add safe.directory /work && \
 
         # Find the spec file
@@ -225,24 +285,21 @@ fi &&
             exit 1
         fi &&
 
-        # Use the original spec file directly
-        echo "Using original spec file: $SPEC_FILE" &&
-
         # Show the spec file
         echo "Spec file contents:" &&
         cat $SPEC_FILE &&
 
         # --- Sanity checks on the spec ---------------------------------------
-        # 1. The spec MUST declare a -devel subpackage. The dev container
-        #    installs the -devel RPM to pull in the pinned deps; a spec with no
-        #    -devel silently produces an incomplete dev image.
+        # 1. The spec MUST declare a -devel subpackage. The dev image installs
+        #    the -devel RPM, so a spec with no -devel produces an image missing
+        #    this package headers.
         #    NB: this whole script runs inside bash -c with SINGLE quotes, so
         #    NO single-quote characters are allowed anywhere below (even in
         #    comments) -- they would terminate the -c string.
-        #    Only the epics profile builds a dev container, so only it needs
+        #    Only the epics profile builds a dev image, so only it needs
         #    a -devel RPM to install into one.
         if [ "$PROFILE" != "lightweight" ] && ! grep -qE "^%package devel" $SPEC_FILE; then
-            echo "ERROR: spec has no %package devel section; dev container needs the -devel RPM." &&
+            echo "ERROR: spec has no %package devel section; dev image needs the -devel RPM." &&
             exit 1
         fi &&
         # NB: we deliberately do NOT require BuildRequires to be mirrored in
@@ -250,7 +307,85 @@ fi &&
         # intentionally loose or absent -- support modules and VME IOCs build
         # cross-compiled binaries that never run on this host, and pinning their
         # runtime deps would force version conflicts when many are co-installed.
+        # The dev image gets its toolchain from BuildRequires below, NOT from
+        # the -devel runtime Requires, so there is no reason to over-pin those.
         echo "Spec check passed: -devel subpackage present." &&
+
+        # Check for custom repo setup script and run it if found
+        if [ -f "custom-repo-setup.sh" ]; then
+            echo "Found custom repo setup script, running it..." &&
+            chmod +x custom-repo-setup.sh &&
+            ./custom-repo-setup.sh
+        fi &&
+
+        # Install build dependencies from spec file. Hard-fail if any pinned
+        # dependency cannot be resolved -- a missing/incorrect NVR must turn the
+        # pipeline red, not silently build against whatever happens to be
+        # present. Checked explicitly: bash set -e ignores a failure in the
+        # non-final position of an && list, so an unchecked builddep here used
+        # to be swallowed and the build carried on with NO deps installed.
+        echo "Installing build dependencies..." &&
+        if ! dnf builddep -y $SPEC_FILE; then
+            echo "ERROR: dnf builddep failed -- a BuildRequires could not be resolved." >&2 &&
+            echo "       Fix the pin in $SPEC_FILE (or register the missing RPM) and re-run." >&2 &&
+            exit 1
+        fi &&
+
+        # --- Report the EXACT versions this build resolved against -----------
+        # Print every -devel build dependency that the spec named, with the
+        # exact NVR that actually got installed, in copy-pasteable pin form.
+        # Read the log of any build to see what to hard-pin in a release spec
+        # (see the dependency-versioning appendix in README). No single quotes
+        # below -- this whole block runs inside bash -c with single quotes.
+        echo "========== BUILD DEPENDENCY VERSIONS (pin these) ==========" &&
+        for dep in $(grep -hoE "^(BuildRequires|Requires):[^#]*" $SPEC_FILE | sed -E "s/^(BuildRequires|Requires)://" | tr "," " " | tr -s " " "\n" | grep -- "-devel" | sort -u); do
+            nvr=$(rpm -q --queryformat "%{NAME} = %{VERSION}-%{RELEASE}" "$dep" 2>/dev/null || true);
+            case "$nvr" in *" = "*) echo "  $nvr" ;; *) echo "  $dep (NOT INSTALLED)" ;; esac;
+        done;
+        echo "===========================================================" &&
+
+        # --- The build environment IS the dev image ---------------------------
+        # If the spec builds against EPICS, the rules the build needs must be
+        # present. A dev image without them looks fine until a developer runs
+        # make and hits "No rule to make target .../configure/RULES_TOP".
+        if grep -qE "^BuildRequires:.*epics-base-devel" $SPEC_FILE; then
+            test -f /gem_base/epics/epics-base/configure/RULES_TOP || { \
+                echo "ERROR: epics-base-devel resolved but RULES_TOP is missing." >&2 && \
+                exit 1; } &&
+            echo "Env check passed: EPICS build rules present."
+        fi &&
+
+        # Shrink the layer we are about to commit.
+        dnf clean all &&
+        rm -rf /var/cache/dnf
+    '
+
+echo "Snapshotting the build environment as ${BUILDER_TAG}"
+docker commit "$ENV_CONTAINER" "$BUILDER_TAG" >/dev/null
+docker rm -f "$ENV_CONTAINER" >/dev/null
+
+# ===========================================================================
+# STAGE 2 -- build the RPM inside that environment. Unchanged from the second
+# half of the original single container run.
+# ===========================================================================
+echo "=== Stage 2/3: building the RPM ==="
+docker run --rm -v $(pwd):/work -w /work \
+    $NETWORK_ARGS \
+    -e GIT_HASH="$GIT_HASH" \
+    -e GIT_BRANCH="$GIT_BRANCH" \
+    -e EL_VERSION="$EL_VERSION" \
+    -e PROFILE="$PROFILE" \
+    -e SPEC_PATH="$SPEC_PATH" \
+    "$BUILDER_TAG" \
+    /bin/bash -c 'set -ex && \
+        # Find the spec file
+        if [ -n "$SPEC_PATH" ]; then
+    SPEC_FILE="$SPEC_PATH"
+    [ -f "$SPEC_FILE" ] || { echo "ERROR: --spec $SPEC_FILE not found" >&2; exit 1; }
+else
+    SPEC_FILE=$(ls *.spec 2>/dev/null || ls SPECS/*.spec 2>/dev/null)
+fi &&
+        echo "Using original spec file: $SPEC_FILE" &&
 
         # Get the version directly from the spec file using grep
         PACKAGE_VERSION=$(grep "^%define version" $SPEC_FILE | awk "{print \$3}") &&
@@ -270,32 +405,6 @@ fi &&
             PACKAGE_VERSION=$(rpmspec -q --queryformat "%{version}\n" $SPEC_FILE | head -1)
         fi &&
         echo "Package version: $PACKAGE_VERSION" &&
-
-        # Check for custom repo setup script and run it if found
-        if [ -f "custom-repo-setup.sh" ]; then
-            echo "Found custom repo setup script, running it..." &&
-            chmod +x custom-repo-setup.sh &&
-            ./custom-repo-setup.sh
-        fi &&
-
-        # Install build dependencies from spec file. Hard-fail if any pinned
-        # dependency cannot be resolved -- a missing/incorrect NVR must turn the
-        # pipeline red, not silently build against whatever happens to be present.
-        echo "Installing build dependencies..." &&
-        dnf builddep -y $SPEC_FILE &&
-
-        # --- Report the EXACT versions this build resolved against -----------
-        # Print every -devel build dependency that the spec named, with the
-        # exact NVR that actually got installed, in copy-pasteable pin form.
-        # Read the log of any build to see what to hard-pin in a release spec
-        # (see the dependency-versioning appendix in README). No single quotes
-        # below -- this whole block runs inside bash -c with single quotes.
-        echo "========== BUILD DEPENDENCY VERSIONS (pin these) ==========" &&
-        for dep in $(grep -hoE "^(BuildRequires|Requires):[^#]*" $SPEC_FILE | sed -E "s/^(BuildRequires|Requires)://" | tr "," " " | tr -s " " "\n" | grep -- "-devel" | sort -u); do
-            nvr=$(rpm -q --queryformat "%{NAME} = %{VERSION}-%{RELEASE}" "$dep" 2>/dev/null || true);
-            case "$nvr" in *" = "*) echo "  $nvr" ;; *) echo "  $dep (NOT INSTALLED)" ;; esac;
-        done;
-        echo "===========================================================" &&
 
         # Create rpmbuild SOURCES directory
         mkdir -p /root/rpmbuild/SOURCES &&
@@ -367,3 +476,52 @@ fi &&
 
 echo "RPM build complete! RPMs can be found in the rpms/ directory:"
 ls -l rpms/
+
+# ===========================================================================
+# STAGE 3 -- dev image = the build environment + this package installed.
+# Replaces the separate build-docker job and its Dockerfile, which rebuilt the
+# environment from scratch on a second runner (another rpm-repo pull, another
+# free-disk-space) and resolved deps from the -devel runtime Requires instead
+# of the spec BuildRequires.
+# Skipped for lightweight, which has no toolchain and had no dev image before.
+# ===========================================================================
+if [ "$PROFILE" = "lightweight" ]; then
+    echo "Profile lightweight: skipping dev image"
+    exit 0
+fi
+
+echo "=== Stage 3/3: dev image ${DEV_TAG} ==="
+docker run --name "$DEV_CONTAINER" -v $(pwd):/work -w /work \
+    $NETWORK_ARGS \
+    "$BUILDER_TAG" \
+    /bin/bash -c 'set -ex && \
+        if ls /work/rpms/*-devel*.rpm 1> /dev/null 2>&1; then \
+            dnf install -y /work/rpms/*-devel*.rpm /work/rpms/*.rpm; \
+        else \
+            dnf install -y /work/rpms/*.rpm; \
+        fi && \
+        dnf clean all && \
+        rm -rf /var/cache/dnf
+    '
+
+docker commit "$DEV_CONTAINER" "$DEV_TAG" >/dev/null
+docker tag "$DEV_TAG" "$ALT_TAG"
+docker rm -f "$DEV_CONTAINER" >/dev/null
+echo "Built ${DEV_TAG}"
+echo "Built ${ALT_TAG}"
+
+# Push only from CI, and never from a pull request -- a PR build would
+# otherwise overwrite the branch dev image with an unreviewed one.
+if [ -z "$GITHUB_ACTIONS" ]; then
+    echo
+    echo "Dev image built locally. To push it, run:"
+    echo "  docker push ${DEV_TAG}"
+    echo "  docker push ${ALT_TAG}"
+elif [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+    echo "Pull request: dev image built but NOT pushed."
+else
+    echo "Pushing dev images to the registry..."
+    docker push "$DEV_TAG"
+    docker push "$ALT_TAG"
+    echo "Successfully pushed dev images"
+fi

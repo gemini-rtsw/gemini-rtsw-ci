@@ -110,9 +110,9 @@ sequenceDiagram
 
 ## Shipping a container by RPM
 
-`app_image` is not `build_docker.sh`. That builds a *developer* container
-(toolchain + `-devel` RPMs) for `dev_environment.sh`. `app_image` builds the
-container the repo **ships**.
+`app_image` is not the *developer* container. `build_rpm.sh` publishes that one
+(the build environment + this repo's `-devel` RPMs) for `dev_environment.sh`.
+`app_image` builds the container the repo **ships**.
 
 Tags come from the spec, never from an argument:
 
@@ -164,10 +164,9 @@ registry outage cannot stop a working local image from starting.
 Prerequisites: Docker running and logged in to GHCR. Run from the **project repo root**, not inside the submodule:
 
 ```bash
-./gemini-rtsw-ci/build_rpm.sh                 # Build RPM -> rpms/
+./gemini-rtsw-ci/build_rpm.sh                 # Build RPM -> rpms/ AND the dev image
 ./gemini-rtsw-ci/build_rpm.sh --profile lightweight --spec packaging/foo.spec
 ./gemini-rtsw-ci/build_app_image.sh --no-push # Build the runtime image (after build_rpm.sh)
-./gemini-rtsw-ci/build_docker.sh              # Build dev Docker image
 ./gemini-rtsw-ci/dev_environment.sh           # el8-latest-devel (default)
 ./gemini-rtsw-ci/dev_environment.sh --el 9    # el9-latest-devel
 ```

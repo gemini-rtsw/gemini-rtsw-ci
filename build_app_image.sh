@@ -1,8 +1,9 @@
 #!/bin/bash
 # build_app_image.sh -- build and push a repo's APPLICATION image.
 #
-# Not the same thing as build_docker.sh. That builds a *developer* container
-# (toolchain plus -devel RPMs) for dev_environment.sh. This builds the container
+# Not the same thing as the dev image build_rpm.sh publishes. That is a
+# *developer* container (build environment plus -devel RPMs) for
+# dev_environment.sh. This builds the container
 # the repo actually ships: a Python service, a web gateway, anything whose
 # product is the image rather than the RPM.
 #

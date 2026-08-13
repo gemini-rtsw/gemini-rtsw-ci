@@ -48,6 +48,11 @@ on:
         required: false
         default: ''
         type: string
+      dev_image_suffix:
+        description: "Suffix for the published dev image tags, e.g. '-test' to try a pipeline change without overwriting el<N>-latest-devel."
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -89,11 +94,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build RPM
+      # Builds the environment once, then reuses it for the RPM AND the dev
+      # image (build_rpm.sh stages 1-3). There is no separate build-docker job
+      # any more: it rebuilt the same environment on a second runner, from the
+      # -devel RPM runtime Requires rather than the spec BuildRequires, which
+      # produced dev images with no toolchain for any package whose -devel did
+      # not happen to list one.
+      - name: Build RPM and dev image
         env:
           BUILDER_IMAGE: ${{ inputs.builder_image }}
           SPEC_PATH: ${{ inputs.spec_path }}
           PROFILE: ${{ inputs.profile }}
+          DEV_IMAGE_SUFFIX: ${{ inputs.dev_image_suffix }}
         run: |
           chmod +x ${{ inputs.scripts_dir }}/build_rpm.sh
           if [ "${{ inputs.is_prod }}" = "true" ]; then
@@ -130,7 +142,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # Scope by EL so matrix legs (el8/el9) don't collide on one artifact
-          # name -- otherwise the docker job could download the wrong EL's RPMs.
+          # name -- a shared name means whoever downloads it may get either EL.
           name: rpms-el${{ inputs.el_version }}
           path: rpms/*.rpm
 
@@ -154,52 +166,3 @@ jobs:
           # finish -- so there is a single writer of :latest and no race.
           chmod +x upload-rpm.sh
           ./upload-rpm.sh --tag-only ../rpms/*.rpm
-
-  # Skipped for lightweight packages: the dev container exists to give an EPICS
-  # developer a toolchain, and a package with no C build has no use for one.
-  build-docker:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    needs: build-rpm
-    if: inputs.profile != 'lightweight' 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      # The dev-image build pulls the rpm-repo (~6GB) + installs the full dep
-      # set into the container; reclaim runner disk first or it runs out (~1GB
-      # short observed).
-      - name: Free up disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
-      - name: Download RPM artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: rpms-el${{ inputs.el_version }}
-          path: rpms/
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        run: |
-          chmod +x ${{ inputs.scripts_dir }}/build_docker.sh
-          if [ "${{ inputs.is_prod }}" = "true" ]; then
-            ${{ inputs.scripts_dir }}/build_docker.sh --el ${{ inputs.el_version }} --prod
-          else
-            ${{ inputs.scripts_dir }}/build_docker.sh --el ${{ inputs.el_version }}
-          fi
