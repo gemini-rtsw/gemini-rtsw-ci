@@ -1,6 +1,6 @@
 # Development workflows
 
-How to work on a package built by this pipeline. For how the pipeline itself works, see [README.md](README.md).
+How to work on a package already built by this pipeline. **Creating or migrating a repo** is in [README.md](README.md#start-a-new-repo) — it has cut-and-paste templates for every file you need.
 
 In a nutshell: **clone → work (in the dev container if you need one) → push → CI builds and publishes the RPM → install it.** `build_rpm.sh` is for local testing and verification; it is never required.
 
@@ -102,91 +102,86 @@ Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh d
 
 ## Workflow B — non-EPICS (lightweight) packages
 
-For packages with no EPICS content: config files, scripts, a systemd unit, a Python service. The lightweight profile skips the whole EPICS apparatus — no `gemini-ade`, no rpm-repo dependency container — which turns a multi-GB build into a fast one.
+Config files, scripts, a systemd unit, a Python service. No EPICS toolchain, so the loop is shorter: there is nothing to compile before you push.
 
-### 1. Workflow file
+### 1. Clone
 
-```yaml
-name: Build
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-jobs:
-  build:
-    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
-    with:
-      scripts_dir: gemini-rtsw-ci
-      profile: lightweight
-      el_version: '9'                   # one EL is usually enough; no matrix
-      spec_path: packaging/foo.spec     # only if not ./*.spec or SPECS/*.spec
-
-  publish:
-    needs: build
-    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
-    secrets: inherit
+```bash
+git clone --recurse-submodules <repo-url>
+cd <repo-name>
+git checkout -b <your-branch-name>
 ```
 
-`el_version` defaults to **8**. Set it explicitly for an EL9 package.
+### 2. Edit and push
 
-### 2. Spec
+Edit on the host with your normal editor. Then:
 
-Nothing special — an ordinary RPM spec. Two differences from Workflow A:
+```bash
+git add <files>
+git commit -m "<message>"
+git push -u origin <your-branch-name>
+```
 
-- **Dependencies come from the base image only** (BaseOS/AppStream). The lightweight profile does not enable EPEL, CRB/PowerTools, or the rpm-repo. If you need something from EPEL, add a `custom-repo-setup.sh` (see [README](README.md#custom-dependency-setup)).
-- **No `%package devel` needed** — nothing compiles against a config package.
+Merging to `main` builds and publishes the RPM.
 
-### 3. Develop
+### 3. Install it
 
-Edit on the host and push. CI builds and publishes the RPM; install it from rpm-repo.
+```bash
+sudo dnf install <name>          # or: sudo dnf upgrade <name>
+rpm -q <name>                    # confirms the exact build you are running
+```
 
-A dev container is published for lightweight packages too, though you rarely need one to edit config: it is the build environment with your package already installed, so it is the place to check that files landed where you expected. `./gemini-rtsw-ci/dev_environment.sh --el 9` (match the EL your package builds for).
+### 4. Check it before pushing (optional)
 
-To check a change before pushing, you can build the RPM locally. Optional:
+Build the RPM locally:
 
 ```bash
 ./gemini-rtsw-ci/build_rpm.sh --profile lightweight --el 9
-./gemini-rtsw-ci/build_rpm.sh --profile lightweight --spec packaging/foo.spec
 ```
 
-RPMs land in `rpms/`.
+RPMs land in `rpms/`. Or open the dev container — the build environment with your package already installed, which is the place to confirm files landed where you expected:
+
+```bash
+./gemini-rtsw-ci/dev_environment.sh --el 9    # match the EL your package builds for
+```
 
 ---
 
-## Workflow C — shipping a container
+## Workflow C — repos that ship a container
 
-For a repo whose product is a container image, deployed by RPM: the RPM installs a systemd unit, the unit runs the image. Add this to Workflow A or B.
+The repo builds a container image *and* an RPM. The RPM installs a systemd unit; the unit pulls the image and runs it. Nothing is ever built on the deployed host — which is what makes this work on a closed network.
 
-### 1. Point the workflow at your Dockerfile
+Add Workflow A or B for the code loop; this is what is different.
 
-```yaml
-      app_image: Dockerfile        # path to the APPLICATION Dockerfile
-```
+### 1. What CI does on a push to `main`
+
+1. builds the RPM and the dev image, as always
+2. builds your `Dockerfile` and pushes it, tagged from the spec version
+3. registers the RPM
+
+That order is deliberate: the image is pushed **before** the RPM registers, so a published RPM can never name an image that does not exist. On a pull request the image is built but not pushed, so a broken Dockerfile still fails the PR.
 
 ### 2. Tags come from the spec, never from an argument
 
 ```
-ghcr.io/gemini-rtsw/<repo>:<version>              # pin this in the unit
+ghcr.io/gemini-rtsw/<repo>:<version>              # what the unit pins
 ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR
-ghcr.io/gemini-rtsw/<repo>:latest
+ghcr.io/gemini-rtsw/<repo>:latest                 # convenience; never pin this
 ```
 
-`build_rpm.sh` records the version it resolved and `build_app_image.sh` reads it, so the image and the RPM can never disagree. `rpm -q` shows what is deployed; `dnf downgrade` rolls both back together.
+Bump the version in the spec and both the RPM and the image move together. `rpm -q` tells you which image a host runs; `dnf downgrade` is a real rollback.
 
-### 3. Nothing is built on the host
+### 3. Deploy to a host
 
-The pipeline builds and pushes the image. The RPM only installs a systemd unit that **pulls** it by tag — deployed hosts never build anything, which is the point of shipping this way.
+```bash
+sudo dnf upgrade <name>
+sudo systemctl restart <service>     # the new image takes effect on restart
+systemctl status <service>
+```
 
-Within a run the image is pushed **before** the RPM is registered, so a published RPM can never name an image that does not exist. On a pull request the image is built but not pushed, so a broken Dockerfile still fails the PR.
+The unit pulls on start, so the first restart after an upgrade fetches the new image. **Root must be able to pull it** — the unit runs `docker pull` as root, not as you. Simplest is to make the package public; otherwise see [README](README.md#shipping-a-container-by-rpm).
 
-### 4. The host must be able to pull as root
-
-A systemd unit runs `docker pull` as **root**, so root needs the credential — not the installing user. Simplest is to make the package public (repo → Packages → visibility). Otherwise see [README](README.md#shipping-a-container-by-rpm) for giving root the credential.
-
-Keep `ExecStartPre=-/usr/bin/docker pull` (leading `-`) in the unit, so a registry outage cannot stop a working local image from starting.
-
-### 5. Build it locally
+### 4. Build the image locally (optional)
 
 ```bash
 ./gemini-rtsw-ci/build_rpm.sh                  # first — records the version

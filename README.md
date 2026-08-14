@@ -52,7 +52,11 @@ sequenceDiagram
   Pub->>Repo: 5. push rebuilt rpm-repo:latest
 ```
 
-## Set up a new repo
+## Start a new repo
+
+Every repo needs **two files**: `.github/workflows/ci.yml` and a `.spec`. A repo that ships a container needs **two more**: a `Dockerfile` and a systemd `.service.in`. Templates for all of them are below — copy, rename, done.
+
+First, the two steps that are the same for every repo:
 
 1. **Add the submodule:**
    ```bash
@@ -61,45 +65,242 @@ sequenceDiagram
    git add .gitmodules gemini-rtsw-ci
    ```
 
-2. **Add `.github/workflows/ci.yml`:**
-   ```yaml
-   name: Build
-   on:
-     push:
-       branches: [main]
-     pull_request:
-       branches: [main]
-   jobs:
-     build:
-       strategy:
-         fail-fast: false
-         matrix:
-           el: ['8', '9']   # trim to the ELs your package supports
-       uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
-       with:
-         scripts_dir: gemini-rtsw-ci
-         el_version: ${{ matrix.el }}
-
-     # Rebuilds rpm-repo:latest ONCE after all EL legs have pushed their
-     # scratch tags. Without this job the RPM never lands in the served repo.
-     publish:
-       needs: build
-       uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
-       secrets: inherit
-   ```
-   That is the whole file for a standard EPICS package. Everything else is
-   optional — see the inputs below, or [WORKFLOW.md](WORKFLOW.md) for a
-   non-EPICS or container-shipping repo.
-
-3. **Add a `.spec` file** in the repo root or `SPECS/` (or set `spec_path`).
-
-4. **Grant the repo Write access to `rpm-repo`** (required — the build reads dependencies *and* publishes its RPM):
+2. **Grant the repo Write access to `rpm-repo`** — the build reads dependencies *and* publishes its RPM:
    - Open **github.com/orgs/gemini-rtsw/packages/container/rpm-repo/settings**
-   - Under **Manage Actions access** → **Add Repository**, add the new repo, role **Write**.
+   - **Manage Actions access** → **Add Repository** → your repo, role **Write**
 
-5. **Push.** Common failures if step 4 is missed:
-   - `docker: ... denied` pulling `rpm-repo:latest` — no read access.
-   - `denied: permission_denied: write_package` at publish — has read but not write.
+   Miss this and you get `docker: ... denied` on pull, or `denied: permission_denied: write_package` at publish.
+
+Then pick your type.
+
+<details>
+<summary><b>A — EPICS package</b> (IOC or support module) — 2 files</summary>
+
+**`.github/workflows/ci.yml`**
+```yaml
+name: Build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        el: ['8', '9']          # trim to the ELs you support
+    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
+    with:
+      scripts_dir: gemini-rtsw-ci
+      el_version: ${{ matrix.el }}
+
+  publish:                       # rebuilds rpm-repo:latest once, after all legs
+    needs: build
+    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
+    secrets: inherit
+```
+
+**`<name>.spec`** — pin every `BuildRequires` with `%{?dist}`; see [Writing the spec](#writing-the-spec).
+```spec
+%define _prefix /gem_base/epics/support
+%define name    <name>
+%define arch    %(uname -m)
+%define checkout %(if [ -n "$GIT_HASH" ]; then echo "$GIT_HASH"; else git rev-parse --short HEAD 2>/dev/null || echo nogit; fi)
+
+# Keep cross-compiled RTEMS objects out of the debuginfo machinery
+%global _enable_debug_package 0
+%global debug_package %{nil}
+%global __os_install_post /usr/lib/rpm/brp-compress %{nil}
+
+Summary: %{name} Package, a module for EPICS base
+Name: %{name}
+Version: 1.0.0
+Release: 1.git.%{checkout}%{?dist}
+License: EPICS Open License
+Source0: %{name}-%{version}.tar.gz
+ExclusiveArch: %{arch}
+Prefix: %{_prefix}
+
+BuildRequires: epics-base-devel = 7.0.7-0.git.054b1d4%{?dist} re2c gemini-ade
+# add support modules the same way: geminiRec-devel = 4.1.13-3.git.5dcd2db%{?dist}
+
+%description
+This is the module %{name}.
+
+%package devel
+Summary: %{name}-devel Package
+Requires: %{name} = %{version}-%{release}
+%description devel
+Headers and libraries for building against %{name}.
+
+%prep
+%setup -q
+
+%build
+make distclean uninstall
+make
+
+%install
+export DONT_STRIP=1
+rm -rf $RPM_BUILD_ROOT
+mkdir -p $RPM_BUILD_ROOT/%{_prefix}/%{name}
+for d in dbd db lib include configure; do
+  [ -d $d ] && cp -r $d $RPM_BUILD_ROOT/%{_prefix}/%{name}
+done
+
+%files
+%defattr(-,root,root)
+/%{_prefix}/%{name}
+
+%changelog
+* Mon Jan 01 2026 You <you@noirlab.edu> - 1.0.0-1
+- Initial packaging.
+```
+
+Working examples: `slalib` (small), `mcs_mk` (IOC).
+</details>
+
+<details>
+<summary><b>B — non-EPICS package</b> (config, scripts, a service) — 2 files</summary>
+
+**`.github/workflows/ci.yml`** — one EL is usually enough, so no matrix:
+```yaml
+name: Build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
+    secrets: inherit
+    with:
+      scripts_dir: gemini-rtsw-ci
+      profile: lightweight
+      el_version: '9'
+      spec_path: packaging/<name>.spec    # omit if the spec is in the repo root
+
+  publish:
+    needs: build
+    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
+    secrets: inherit
+```
+
+**`<name>.spec`** — an ordinary spec. Dependencies resolve from the base image only (no EPEL, no CRB, no rpm-repo); if you need EPEL, add a [`custom-repo-setup.sh`](#custom-dependency-setup).
+```spec
+%global specver 0.1.0
+%define git_hash %(git rev-parse --short HEAD 2>/dev/null || echo nogit)
+
+Name:           <name>
+Version:        %{specver}
+Release:        1.git%{git_hash}%{?dist}
+Summary:        <one line>
+License:        Proprietary
+Source0:        %{name}-%{version}.tar.gz
+BuildArch:      noarch
+Requires:       python3
+
+%description
+<what this ships>
+
+%prep
+%autosetup
+
+%install
+install -Dpm 0755 tools/<script>.py %{buildroot}%{_bindir}/<script>
+install -Dpm 0644 config/<name>.conf %{buildroot}%{_sysconfdir}/<name>.conf
+
+%files
+%{_bindir}/<script>
+%config(noreplace) %{_sysconfdir}/<name>.conf
+
+%changelog
+* Mon Jan 01 2026 You <you@noirlab.edu> - 0.1.0-1
+- Initial packaging.
+```
+</details>
+
+<details>
+<summary><b>C — repo that ships a container</b> — add 2 files to A or B</summary>
+
+The RPM ships a systemd unit; the unit pulls the image. **Nothing is built on the deployed host.** Works with either profile.
+
+**1. `ci.yml`** — add one line:
+```yaml
+      app_image: Dockerfile          # path to the APPLICATION Dockerfile
+```
+
+**2. `Dockerfile`** — whatever your service needs at runtime. You author this one; the build/dev image is derived from `BuildRequires` and needs no Dockerfile.
+
+**3. `deploy/<name>.service.in`** — a template; `@IMAGE@` is substituted at build time:
+```ini
+[Unit]
+Description=<service>
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+
+# Pinned to the release version, never :latest, so `rpm -q` tells you what runs
+# and a reboot cannot silently change it.
+Environment=IMAGE=@IMAGE@
+
+# Best-effort pull: a registry outage must not stop a working local image.
+ExecStartPre=-/usr/bin/docker pull ${IMAGE}
+ExecStartPre=-/usr/bin/docker rm -f <name>
+
+# Foreground `docker run --rm`, deliberately NOT --restart=always: systemd owns
+# the lifecycle. With both, `systemctl stop` leaves the container running.
+ExecStart=/usr/bin/docker run --rm --name <name> \
+  --network host \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --env-file /etc/sysconfig/<name> \
+  ${IMAGE}
+
+ExecStop=/usr/bin/docker stop -t 10 <name>
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**4. Spec additions** — substitute the tag, install the unit, and let rpm manage it:
+```spec
+BuildRequires:  systemd-rpm-macros
+Requires:       systemd
+%global appimage ghcr.io/gemini-rtsw/<repo>
+
+%build
+sed -e 's|@IMAGE@|%{appimage}:%{version}|' deploy/<name>.service.in > <name>.service
+grep -q '@IMAGE@' <name>.service && { echo "ERROR: placeholder not substituted" >&2; exit 1; }
+
+%install
+install -Dpm 0644 <name>.service %{buildroot}%{_unitdir}/<name>.service
+install -Dpm 0644 deploy/<name>.sysconfig %{buildroot}%{_sysconfdir}/sysconfig/<name>
+
+%post
+%systemd_post <name>.service
+%preun
+%systemd_preun <name>.service
+%postun
+%systemd_postun <name>.service
+
+%files
+%{_unitdir}/<name>.service
+%config(noreplace) %{_sysconfdir}/sysconfig/<name>
+```
+
+**The unit must NOT be `%config(noreplace)`.** It carries the image tag, so an upgrade has to overwrite it — that is how a new release moves the host to a new image. Host-specific settings go in `/etc/sysconfig/<name>`, which *is* `%config(noreplace)` and survives upgrades.
+
+`tsrs_screen` is a complete working example of this pattern.
+</details>
+
+Then push. See [Shipping a container by RPM](#shipping-a-container-by-rpm) for the one host-side requirement: root must be able to pull the image.
 
 ### Workflow inputs
 
@@ -111,7 +312,7 @@ All optional; defaults give the standard EPICS build.
 | `profile` | `epics` | `lightweight` skips gemini-ade and the rpm-repo container — for packages with no EPICS content. Still publishes a dev image. |
 | `spec_path` | *(auto)* | spec location, if not `./*.spec` or `SPECS/*.spec`. |
 | `app_image` | *(none)* | path to a Dockerfile for the container this repo **ships**. |
-| `verify_cmd` | *(none)* | package-specific check, run from the repo root with the RPMs in `rpms/`. |
+| `verify_cmd` | *(none)* | a check CI cannot infer, run from the repo root with the RPMs in `rpms/`. `tsrs_screen` uses it to build a throwaway +1 package and prove the upgrade path keeps `/etc/sysconfig`. |
 | `builder_image` | `rockylinux:<el>` | pin a different build base. |
 | `dev_image_suffix` | *(none)* | suffix for the dev image tags, e.g. `-test`, to try a pipeline change without overwriting `:el<N>-latest-devel`. |
 
