@@ -1,92 +1,88 @@
-# Local development workflow
+# Development workflows
 
-A step-by-step guide to making and testing a change in an EPICS 7 repo built on this pipeline (e.g. `softTCS_mk`). For how the CI pipeline itself works, see [README.md](README.md).
+How to work on a package built by this pipeline. For how the pipeline itself works, see [README.md](README.md).
+
+Three workflows, depending on what you are building:
+
+| | your package | start at |
+|---|---|---|
+| **A** | EPICS: an IOC or support module, needs the EPICS toolchain | [Workflow A](#workflow-a--epics-packages) |
+| **B** | non-EPICS: config, scripts, a systemd unit, a Python service | [Workflow B](#workflow-b--non-epics-lightweight-packages) |
+| **C** | ships a container that a host runs | [Workflow C](#workflow-c--shipping-a-container) |
+
+C builds on A or B — a repo ships a container *in addition to* its RPM.
+
+---
+
+## Workflow A — EPICS packages
+
+For IOCs and support modules (`mcs_mk`, `slalib`, `tcslib`, …). You develop **inside the dev image**, which is the exact environment CI builds in, so you never install the EPICS toolchain locally.
 
 ```mermaid
 flowchart TD
-  subgraph setup["Setup (once per change)"]
-    A["1. Clone repo"] --> B["2. Create branch"]
-  end
-  subgraph loop["Dev loop — inside the Docker container"]
-    C["3. Enter dev container"] --> D["4. Edit code"]
-    D --> E["5. Edit schematics (TDCT)"]
-    E --> F["6. Build & test (make)"]
-    F -->|"not working yet"| D
-  end
-  subgraph after["Build and deploy"]
-    G["7. Commit & push"] --> H["CI builds + publishes RPM"]
-  end
-  B --> C
-  F -->|"happy with the change"| G
+  A["1. Clone with submodules"] --> B["2. Branch"]
+  B --> C["3. Enter dev container"]
+  C --> D["4. Edit code"]
+  D --> E["5. Edit schematics (TDCT)"]
+  E --> F["6. make"]
+  F -->|"not working yet"| D
+  F -->|"good"| G["7. Commit & push -> CI builds and publishes"]
 ```
 
-## Setup (once per change)
-
-### 1. Clone the repo
+### 1. Clone
 
 ```bash
 git clone --recurse-submodules <repo-url>
 cd <repo-name>
 ```
 
-If you already cloned without `--recurse-submodules`:
+Already cloned without submodules? `git submodule update --init --recursive`
 
-```bash
-git submodule update --init --recursive
-```
-
-### 2. Create a branch
+### 2. Branch
 
 ```bash
 git checkout -b <your-branch-name>
 ```
 
-## Dev loop — inside the Docker container
-
-Steps 3-6 are one loop: enter the container, edit, build, check the result, and repeat until you're happy — all before you commit anything.
-
 ### 3. Enter the dev container
 
-On macOS, before entering, allow the container to reach your host's X server (needed for TDCT's GUI in step 5):
+On macOS, first allow the container to reach your X server (TDCT needs it in step 5):
 
 ```bash
 xhost +
 ```
 
-Start the container — this pulls the latest pre-built dev image from GHCR and drops you into a shell inside it, with the repo mounted at `/repo`:
-
 ```bash
-./gemini-rtsw-ci/dev_environment.sh     # defaults to el8; --el 9 for EL9
+./gemini-rtsw-ci/dev_environment.sh          # el8 (default)
+./gemini-rtsw-ci/dev_environment.sh --el 9   # el9
 ```
 
-The container has the full EPICS toolchain already installed — nothing to set up locally. Everything below (steps 4-6) runs from inside this shell.
+This pulls `ghcr.io/gemini-rtsw/<repo>:el<N>-latest-devel` and drops you into a shell with the repo mounted at `/repo`. The image already contains EPICS, RTEMS and every pinned dependency of this package — it is the container CI compiled in.
+
+Steps 4-6 run inside that shell.
 
 ### 4. Edit code
 
-Edit source as needed. (You can also do this step outside the container with your normal editor — the repo directory is the same files either way. Steps 5 and 6 still need the container.)
+Edit anywhere — the files are the same inside and outside the container. Only steps 5 and 6 need to be inside it.
 
-For example, in `softTCS_mk` (SCS), application source lives under `scs-cp-iocApp/src/` (e.g. `scs-cp-iocApp/src/chopControl.h`).
+Application source lives under `<name>App/src/` (e.g. `scs-cp-iocApp/src/chopControl.h`).
 
 ### 5. Edit schematics with TDCT (if applicable)
 
-TDCT is a GUI tool; run it from the package's `Db/` directory, against the `tdct.cfg` found there. For example, in `softTCS_mk` (SCS):
+Run TDCT from the package's `Db/` directory, against the `tdct.cfg` there:
 
 ```bash
 cd scs-cp-iocApp/Db
 tdct -cfg ./tdct.cfg
 ```
 
-### 6. Build and test (`make`)
-
-Compile to check your change before committing — this is faster than a full RPM build. From the repo root (e.g. `scs_cp/`):
+### 6. Build
 
 ```bash
 make
 ```
 
-Not working yet? Go back to step 4. Happy with it? Move on to committing.
-
-## Build and deploy
+Much faster than a full RPM build. Not right yet? Back to step 4.
 
 ### 7. Commit and push
 
@@ -96,21 +92,113 @@ git commit -m "<message>"
 git push -u origin <your-branch-name>
 ```
 
-Pushing triggers CI (`ci.yml`) for that branch/PR: it builds the RPM, publishes it as a scratch tag (`ghcr.io/gemini-rtsw/rpm-repo:rpm-<pkgname>-el<N>`), and pushes a dev image. See [README.md](README.md#how-the-pipeline-works) for the full pipeline flow.
+Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh dev image. **A push to `main` always publishes** — there is no flag that quietly skips it.
 
-### 8. Build the RPM locally (optional)
+**Changing a dependency version?** Read the exact NVR out of the build log's `BUILD DEPENDENCY VERSIONS (pin these)` block and pin it with `%{?dist}` — see [Writing the spec](README.md#writing-the-spec).
 
-Skip CI entirely and build on your own machine — useful for a quick check before pushing, or if you don't want to wait on CI. From the **project repo root** on the host (not inside the submodule):
+---
 
-```bash
-./gemini-rtsw-ci/build_rpm.sh
+## Workflow B — non-EPICS (lightweight) packages
+
+For packages with no EPICS content: config files, scripts, a systemd unit, a Python service. The lightweight profile skips the whole EPICS apparatus — no `gemini-ade`, no rpm-repo dependency container, no dev image — which turns a multi-GB build into a fast one.
+
+### 1. Workflow file
+
+```yaml
+name: Build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/ci.yml@main
+    with:
+      scripts_dir: gemini-rtsw-ci
+      profile: lightweight
+      el_version: '9'                   # one EL is usually enough; no matrix
+      spec_path: packaging/foo.spec     # only if not ./*.spec or SPECS/*.spec
+
+  publish:
+    needs: build
+    uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
+    secrets: inherit
 ```
 
-Produces the package RPM(s) in `rpms/` in the repo root — the same RPMs CI builds, just kept on your machine instead of published. See [README.md](README.md#local-builds) for prerequisites (Docker running, logged in to GHCR).
+`el_version` defaults to **8**. Set it explicitly for an EL9 package.
 
-### 9. Get the RPM CI built (optional)
+### 2. Spec
 
-Two ways, without needing to build it yourself:
+Nothing special — an ordinary RPM spec. Two differences from Workflow A:
 
-- **From the rpm-repo** (published automatically) — see [README.md](README.md#browsing-the-rpm-repo-directly).
-- **From the GitHub Actions run** — see [README.md](README.md#downloading-a-built-rpm-from-github-actions) for the click-by-click steps.
+- **Dependencies come from the base image only** (BaseOS/AppStream). The lightweight profile does not enable EPEL, CRB/PowerTools, or the rpm-repo. If you need something from EPEL, add a `custom-repo-setup.sh` (see [README](README.md#custom-dependency-setup)).
+- **No `%package devel` needed** — nothing compiles against a config package.
+
+### 3. Develop and build locally
+
+There is no dev image for lightweight packages, so work on the host and build the RPM directly:
+
+```bash
+./gemini-rtsw-ci/build_rpm.sh --profile lightweight --el 9
+./gemini-rtsw-ci/build_rpm.sh --profile lightweight --spec packaging/foo.spec
+```
+
+RPMs land in `rpms/`. Then commit and push as in Workflow A step 7.
+
+### 4. Package-specific checks (optional)
+
+Generic CI cannot know that your unit file must pin a particular image, or that an upgrade must preserve `/etc/sysconfig`. Add `verify_cmd:` and it runs from the repo root after the build, with the RPMs in `rpms/`:
+
+```yaml
+      verify_cmd: ./packaging/verify.sh
+```
+
+---
+
+## Workflow C — shipping a container
+
+For a repo whose product is a container image, deployed by RPM: the RPM installs a systemd unit, the unit runs the image. Add this to Workflow A or B.
+
+### 1. Point the workflow at your Dockerfile
+
+```yaml
+      app_image: Dockerfile        # path to the APPLICATION Dockerfile
+```
+
+### 2. Tags come from the spec, never from an argument
+
+```
+ghcr.io/gemini-rtsw/<repo>:<version>              # pin this in the unit
+ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR
+ghcr.io/gemini-rtsw/<repo>:latest
+```
+
+`build_rpm.sh` records the version it resolved and `build_app_image.sh` reads it, so the image and the RPM can never disagree. `rpm -q` shows what is deployed; `dnf downgrade` rolls both back together.
+
+### 3. Ordering is deliberate
+
+The image is pushed **before** the RPM registers, so a published RPM can never pin an image that does not exist. On a pull request the image is built but not pushed — a broken Dockerfile still fails the PR.
+
+### 4. The host must be able to pull as root
+
+A systemd unit runs `docker pull` as **root**, so root needs the credential — not the installing user. Simplest is to make the package public (repo → Packages → visibility). Otherwise see [README](README.md#shipping-a-container-by-rpm) for giving root the credential.
+
+Keep `ExecStartPre=-/usr/bin/docker pull` (leading `-`) in the unit, so a registry outage cannot stop a working local image from starting.
+
+### 5. Build it locally
+
+```bash
+./gemini-rtsw-ci/build_rpm.sh                  # first — records the version
+./gemini-rtsw-ci/build_app_image.sh --no-push  # then — builds the image
+```
+
+---
+
+## Getting a built RPM
+
+Three ways, no local build needed:
+
+- **From rpm-repo** — published automatically; see [README](README.md#browsing-the-rpm-repo-directly).
+- **From the Actions run** — every run uploads `rpms-el<N>` as an artifact; see [README](README.md#downloading-a-built-rpm-from-github-actions).
+- **Locally** — `./gemini-rtsw-ci/build_rpm.sh` from the repo root; RPMs land in `rpms/`.
