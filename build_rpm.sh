@@ -289,18 +289,21 @@ fi &&
         echo "Spec file contents:" &&
         cat $SPEC_FILE &&
 
-        # --- Sanity checks on the spec ---------------------------------------
-        # 1. The spec MUST declare a -devel subpackage. The dev image installs
-        #    the -devel RPM, so a spec with no -devel produces an image missing
-        #    this package headers.
+        # --- Spec notes -------------------------------------------------------
+        # A -devel subpackage is no longer required. It used to be: the dev
+        # image was built by installing the -devel RPM and letting its runtime
+        # Requires drag in a toolchain, so a spec without one produced an image
+        # with nothing useful in it. The dev image now IS the build environment,
+        # resolved from BuildRequires, and the install step already handles a
+        # package that ships no -devel. A leaf package like ca-gateway has no
+        # reason to invent one.
         #    NB: this whole script runs inside bash -c with SINGLE quotes, so
         #    NO single-quote characters are allowed anywhere below (even in
         #    comments) -- they would terminate the -c string.
-        #    Only the epics profile builds a dev image, so only it needs
-        #    a -devel RPM to install into one.
         if [ "$PROFILE" != "lightweight" ] && ! grep -qE "^%package devel" $SPEC_FILE; then
-            echo "ERROR: spec has no %package devel section; dev image needs the -devel RPM." &&
-            exit 1
+            echo "Note: spec has no %package devel section. The dev image will"
+            echo "      contain the build environment and this package, but no"
+            echo "      headers for anything that wants to compile against it."
         fi &&
         # NB: we deliberately do NOT require BuildRequires to be mirrored in
         # Requires. Build deps are pinned (exact headers); runtime Requires are
@@ -309,7 +312,6 @@ fi &&
         # runtime deps would force version conflicts when many are co-installed.
         # The dev image gets its toolchain from BuildRequires below, NOT from
         # the -devel runtime Requires, so there is no reason to over-pin those.
-        echo "Spec check passed: -devel subpackage present." &&
 
         # Check for custom repo setup script and run it if found
         if [ -f "custom-repo-setup.sh" ]; then
