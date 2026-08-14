@@ -102,7 +102,7 @@ Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh d
 
 ## Workflow B — non-EPICS (lightweight) packages
 
-For packages with no EPICS content: config files, scripts, a systemd unit, a Python service. The lightweight profile skips the whole EPICS apparatus — no `gemini-ade`, no rpm-repo dependency container, no dev image — which turns a multi-GB build into a fast one.
+For packages with no EPICS content: config files, scripts, a systemd unit, a Python service. The lightweight profile skips the whole EPICS apparatus — no `gemini-ade`, no rpm-repo dependency container — which turns a multi-GB build into a fast one.
 
 ### 1. Workflow file
 
@@ -139,7 +139,9 @@ Nothing special — an ordinary RPM spec. Two differences from Workflow A:
 
 ### 3. Develop
 
-Edit on the host and push — there is no dev container for lightweight packages, and nothing to set up. CI builds and publishes the RPM; install it from rpm-repo.
+Edit on the host and push. CI builds and publishes the RPM; install it from rpm-repo.
+
+A dev container is published for lightweight packages too, though you rarely need one to edit config: it is the build environment with your package already installed, so it is the place to check that files landed where you expected. `./gemini-rtsw-ci/dev_environment.sh --el 9` (match the EL your package builds for).
 
 To check a change before pushing, you can build the RPM locally. Optional:
 

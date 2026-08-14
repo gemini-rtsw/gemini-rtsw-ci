@@ -108,7 +108,7 @@ All optional; defaults give the standard EPICS build.
 | input | default | what it does |
 |---|---|---|
 | `el_version` | `'8'` | target EL. **An EL9-only package must set this**, or it builds for the wrong EL. |
-| `profile` | `epics` | `lightweight` skips gemini-ade, the rpm-repo container and the dev image — for packages with no EPICS content. |
+| `profile` | `epics` | `lightweight` skips gemini-ade and the rpm-repo container — for packages with no EPICS content. Still publishes a dev image. |
 | `spec_path` | *(auto)* | spec location, if not `./*.spec` or `SPECS/*.spec`. |
 | `app_image` | *(none)* | path to a Dockerfile for the container this repo **ships**. |
 | `verify_cmd` | *(none)* | package-specific check, run from the repo root with the RPMs in `rpms/`. |

@@ -19,7 +19,7 @@ on:
         default: '8'
         type: string
       profile:
-        description: "Build profile: epics (default, unchanged) or lightweight (no gemini-ade, no rpm-repo dep container, no dev image)"
+        description: "Build profile: epics (default, unchanged) or lightweight (no gemini-ade, no rpm-repo dep container)"
         required: false
         default: 'epics'
         type: string

@@ -495,13 +495,15 @@ ls -l rpms/
 # environment from scratch on a second runner (another rpm-repo pull, another
 # free-disk-space) and resolved deps from the -devel runtime Requires instead
 # of the spec BuildRequires.
-# Skipped for lightweight, which has no toolchain and had no dev image before.
+#
+# Every profile publishes one, lightweight included. A lightweight image is
+# small (base + rpm-build + whatever builddep pulled + the package) and its
+# value is a clean box with the package already installed -- check that the
+# unit file landed where you expected, that %post did the right thing, or
+# re-run rpmbuild in exactly the environment CI used. It also means
+# dev_environment.sh works for every repo, with no "unless it is lightweight"
+# exception to remember.
 # ===========================================================================
-if [ "$PROFILE" = "lightweight" ]; then
-    echo "Profile lightweight: skipping dev image"
-    exit 0
-fi
-
 echo "=== Stage 3/3: dev image ${DEV_TAG} ==="
 docker run --name "$DEV_CONTAINER" -v $(pwd):/work -w /work \
     $NETWORK_ARGS \
