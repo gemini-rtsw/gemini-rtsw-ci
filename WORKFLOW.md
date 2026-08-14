@@ -2,6 +2,8 @@
 
 How to work on a package built by this pipeline. For how the pipeline itself works, see [README.md](README.md).
 
+In a nutshell: **clone → work (in the dev container if you need one) → push → CI builds and publishes the RPM → install it.** `build_rpm.sh` is for local testing and verification; it is never required.
+
 Three workflows, depending on what you are building:
 
 | | your package | start at |
@@ -135,24 +137,18 @@ Nothing special — an ordinary RPM spec. Two differences from Workflow A:
 - **Dependencies come from the base image only** (BaseOS/AppStream). The lightweight profile does not enable EPEL, CRB/PowerTools, or the rpm-repo. If you need something from EPEL, add a `custom-repo-setup.sh` (see [README](README.md#custom-dependency-setup)).
 - **No `%package devel` needed** — nothing compiles against a config package.
 
-### 3. Develop and build locally
+### 3. Develop
 
-There is no dev image for lightweight packages, so work on the host and build the RPM directly:
+Edit on the host and push — there is no dev container for lightweight packages, and nothing to set up. CI builds and publishes the RPM; install it from rpm-repo.
+
+To check a change before pushing, you can build the RPM locally. Optional:
 
 ```bash
 ./gemini-rtsw-ci/build_rpm.sh --profile lightweight --el 9
 ./gemini-rtsw-ci/build_rpm.sh --profile lightweight --spec packaging/foo.spec
 ```
 
-RPMs land in `rpms/`. Then commit and push as in Workflow A step 7.
-
-### 4. Package-specific checks (optional)
-
-Generic CI cannot know that your unit file must pin a particular image, or that an upgrade must preserve `/etc/sysconfig`. Add `verify_cmd:` and it runs from the repo root after the build, with the RPMs in `rpms/`:
-
-```yaml
-      verify_cmd: ./packaging/verify.sh
-```
+RPMs land in `rpms/`.
 
 ---
 
@@ -176,9 +172,11 @@ ghcr.io/gemini-rtsw/<repo>:latest
 
 `build_rpm.sh` records the version it resolved and `build_app_image.sh` reads it, so the image and the RPM can never disagree. `rpm -q` shows what is deployed; `dnf downgrade` rolls both back together.
 
-### 3. Ordering is deliberate
+### 3. Nothing is built on the host
 
-The image is pushed **before** the RPM registers, so a published RPM can never pin an image that does not exist. On a pull request the image is built but not pushed — a broken Dockerfile still fails the PR.
+The pipeline builds and pushes the image. The RPM only installs a systemd unit that **pulls** it by tag — deployed hosts never build anything, which is the point of shipping this way.
+
+Within a run the image is pushed **before** the RPM is registered, so a published RPM can never name an image that does not exist. On a pull request the image is built but not pushed, so a broken Dockerfile still fails the PR.
 
 ### 4. The host must be able to pull as root
 
