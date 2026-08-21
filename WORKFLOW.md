@@ -27,7 +27,6 @@ flowchart TD
   C --> D["4. Edit code"]
   D --> E["5. Edit schematics (TDCT)"]
   E --> F["6. make"]
-  F -->|"not working yet"| D
   F -->|"good"| G["7. Commit & push -> CI builds and publishes"]
 ```
 
