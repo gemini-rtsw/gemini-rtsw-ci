@@ -18,7 +18,7 @@ C builds on A or B — a repo ships a container *in addition to* its RPM.
 
 ## Workflow A — EPICS packages
 
-For IOCs and support modules (`mcs_mk`, `slalib`, `tcslib`, …). You develop **inside the dev image**, which is the exact environment CI builds in, so you never install the EPICS toolchain locally.
+For IOCs and support modules (`mcs_mk`, `slalib`, `tcslib`, …). You develop **inside the dev image**, which is the exact environment CI builds in.
 
 ```mermaid
 flowchart TD
