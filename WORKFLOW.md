@@ -123,14 +123,7 @@ git push -u origin <your-branch-name>
 
 Merging to `main` builds and publishes the RPM.
 
-### 3. Install it
-
-```bash
-sudo dnf install <name>          # or: sudo dnf upgrade <name>
-rpm -q <name>                    # confirms the exact build you are running
-```
-
-### 4. Check it before pushing (optional)
+### 3. Check it before pushing (optional)
 
 Build the RPM locally:
 
