@@ -93,9 +93,7 @@ git commit -m "<message>"
 git push -u origin <your-branch-name>
 ```
 
-Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh dev image. **A push to `main` always publishes** — there is no flag that quietly skips it.
-
-**Changing a dependency version?** Read the exact NVR out of the build log's `BUILD DEPENDENCY VERSIONS (pin these)` block and pin it with `%{?dist}` — see [Writing the spec](README.md#writing-the-spec).
+Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh dev image. 
 
 ---
 
