@@ -191,7 +191,10 @@ jobs:
 **`<name>.spec`** — an ordinary spec. Dependencies resolve from the base image only (no EPEL, no CRB, no rpm-repo); if you need EPEL, add a [`custom-repo-setup.sh`](#custom-dependency-setup).
 ```spec
 %global specver 0.1.0
-%define git_hash %(git rev-parse --short HEAD 2>/dev/null || echo nogit)
+# $GIT_HASH first: build_rpm.sh computes it on the host and passes it in.
+# Shelling out to git alone yields "nogit" inside the builder, which would make
+# the Release and the container tag disagree.
+%define git_hash %(if [ -n "$GIT_HASH" ]; then echo "$GIT_HASH"; else git rev-parse --short HEAD 2>/dev/null || echo nogit; fi)
 
 Name:           <name>
 Version:        %{specver}
@@ -276,7 +279,7 @@ Requires:       systemd
 %global appimage ghcr.io/gemini-rtsw/<repo>
 
 %build
-sed -e 's|@IMAGE@|%{appimage}:%{version}|' deploy/<name>.service.in > <name>.service
+sed -e 's|@IMAGE@|%{appimage}:%{version}-git%{git_hash}|' deploy/<name>.service.in > <name>.service
 grep -q '@IMAGE@' <name>.service && { echo "ERROR: placeholder not substituted" >&2; exit 1; }
 
 %install
@@ -353,14 +356,33 @@ Two different containers, easy to confuse:
 Tags come from the spec, never from an argument:
 
 ```
-ghcr.io/gemini-rtsw/<repo>:<version>              # pin this in a unit
-ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR
-ghcr.io/gemini-rtsw/<repo>:latest
+ghcr.io/gemini-rtsw/<repo>:<version>              # moves with every build of that version
+ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR -- PIN THIS
+ghcr.io/gemini-rtsw/<repo>:latest                 # convenience; never pin this
 ```
+
+**Pin `<version>-git<hash>`, not `<version>`.** A bare `:<version>` is retagged
+by every build of that version, so two different images can answer to it. Pin
+it and `dnf downgrade` moves the RPM back while the host keeps pulling whatever
+last claimed the tag — the rollback silently does nothing. Only the
+`-git<hash>` tag names exactly one immutable image.
 
 `build_rpm.sh` records the version it resolved and `build_app_image.sh` reads
 it, so an RPM can pin the exact container a host runs — `rpm -q` shows what is
-deployed, `dnf downgrade` rolls it back. The image is pushed **before** the RPM
+deployed, `dnf downgrade` rolls it back.
+
+**The spec's hash macro must read `$GIT_HASH` first.** `build_rpm.sh` computes
+the hash on the *host* and passes it into the build container as an
+environment variable; `rpmbuild` runs where the tarball, not the git checkout,
+is authoritative. A macro that only shells out to `git rev-parse` resolves to
+`nogit` whenever git is absent from the builder or trips dubious-ownership —
+and then the RPM's Release and the image tag disagree, so the unit pins a tag
+that was never pushed. Use the `$GIT_HASH`-first form:
+
+```spec
+%define git_hash %(if [ -n "$GIT_HASH" ]; then echo "$GIT_HASH"; \
+                  else git rev-parse --short HEAD 2>/dev/null || echo nogit; fi)
+``` The image is pushed **before** the RPM
 registers, so a published RPM can never pin an image that does not exist. On a
 pull request it is built but not pushed.
 
