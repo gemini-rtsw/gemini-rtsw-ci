@@ -154,12 +154,14 @@ That order is deliberate: the image is pushed **before** the RPM registers, so a
 ### 2. Tags come from the spec, never from an argument
 
 ```
-ghcr.io/gemini-rtsw/<repo>:<version>              # what the unit pins
-ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR
+ghcr.io/gemini-rtsw/<repo>:<version>              # moves with every build of that version
+ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>    # 1:1 with the RPM NVR -- what the unit pins
 ghcr.io/gemini-rtsw/<repo>:latest                 # convenience; never pin this
 ```
 
 Bump the version in the spec and both the RPM and the image move together. `rpm -q` tells you which image a host runs; `dnf downgrade` is a real rollback.
+
+**Pin `<version>-git<hash>`, not `<version>`.** A bare `:<version>` is retagged by every build of that version, so pinning it makes `dnf downgrade` a no-op for the image: the RPM moves back, the host keeps pulling whatever last claimed the tag. See [Shipping a container by RPM](README.md#shipping-a-container-by-rpm).
 
 ### 3. Deploy to a host
 
