@@ -350,11 +350,22 @@ fi &&
         # If the spec builds against EPICS, the rules the build needs must be
         # present. A dev image without them looks fine until a developer runs
         # make and hits "No rule to make target .../configure/RULES_TOP".
+        #
+        # Ask rpm where that file is rather than hard-coding the path. There
+        # are two EPICS layouts in the wild: epics-base 7.0.7 installs its
+        # configure tree under /gem_base/epics/epics-base, while the legacy
+        # 3.14.12 base that a few packages still pin -- see
+        # BuildRequires epics-base-devel(x86-32) -- ships under /gemsoft. The
+        # hard-coded /gem_base path failed the second layout even though the
+        # toolchain was fully installed. Naming the package unqualified lists
+        # every installed arch of it, so a multilib i686 + x86_64 install is
+        # covered too.
         if grep -qE "^BuildRequires:.*epics-base-devel" $SPEC_FILE; then
-            test -f /gem_base/epics/epics-base/configure/RULES_TOP || { \
+            rules_top=$(rpm -ql epics-base-devel 2>/dev/null | grep -m1 -E "configure/RULES_TOP$" || true) &&
+            { test -n "$rules_top" && test -f "$rules_top"; } || { \
                 echo "ERROR: epics-base-devel resolved but RULES_TOP is missing." >&2 && \
                 exit 1; } &&
-            echo "Env check passed: EPICS build rules present."
+            echo "Env check passed: EPICS build rules present at $rules_top"
         fi &&
 
         # Shrink the layer we are about to commit.
