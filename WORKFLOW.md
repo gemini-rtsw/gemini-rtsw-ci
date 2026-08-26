@@ -60,6 +60,8 @@ xhost +
 
 This pulls `ghcr.io/gemini-rtsw/<repo>:el<N>-latest-devel` and drops you into a shell with the repo mounted at `/repo`. The image already contains EPICS, RTEMS and every pinned dependency of this package — it is the container CI compiled in.
 
+If the container needs environment variables the image does not set — `GEMINI_TOP` and `GEMINI_SITE` for a DM screen repo, say — put them in a `custom_env_setup.sh` in your repo root and `dev_environment.sh` will forward them in. See [Custom container environment](README.md#custom-container-environment) for what it can and cannot set; `PATH` in particular has to come from your spec.
+
 Steps 4-6 run inside that shell.
 
 ### 4. Edit code
