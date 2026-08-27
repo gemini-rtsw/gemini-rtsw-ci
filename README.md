@@ -504,3 +504,43 @@ set -e
 # Example: force-install a specific package
 # dnf download some-package && rpm -ivh some-package.rpm --nodeps --force
 ```
+
+## Custom container environment
+
+If the dev container needs environment variables the image does not set, add a
+`custom_env_setup.sh` in your repo root. `dev_environment.sh` picks it up
+automatically; if absent, nothing happens.
+
+```bash
+#!/bin/bash
+# The gemsoft site environment a workstation gets from its own profile and a
+# bare container has no source for.
+export GEMINI_TOP=/gemsoft
+export GEMINI_SITE=MK
+```
+
+It is sourced **on the host**, in a subshell, and never copied into the image.
+The script records `env` before and after sourcing it and forwards only the
+variables the file added or changed, as `-e NAME=VALUE` on the `docker run`.
+Forwarding the whole host environment instead would drag macOS values like
+`TMPDIR` in with it, which breaks the container's profile.d sourcing so the
+gemsoft environment never loads.
+
+Three things to know before you rely on it:
+
+- **Some names are dropped even if you set them.** `PATH`, `HOME`, `USER`,
+  `SHELL`, `TERM`, `PWD`, `OLDPWD` and the shell's own bookkeeping (`BASH_*`,
+  `HIST*`, `SHLVL`, `PS1`, `RANDOM`, …) are filtered out. `PATH` is the one that
+  catches people: you cannot extend the container's `PATH` from here. Ship a
+  `/etc/profile.d` file from your spec instead — see how the RPM already
+  installs one.
+- **Do not set `DISPLAY`.** It is *not* on the filtered list, and these `-e`
+  arguments come last on the `docker run` command line, so a value set here
+  silently overrides the X11 forwarding the script just configured.
+- **Keep values free of spaces.** The forwarded arguments are word-split into
+  the `docker run` command line, so `export FOO="a b"` does not survive intact.
+
+The file is developer tooling: it is not packaged by the spec and never read at
+runtime, so nothing in it can affect a deployed host. That also makes it the
+right home for anything that differs per developer, such as which site's screens
+you want.
