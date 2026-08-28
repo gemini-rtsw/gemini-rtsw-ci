@@ -42,13 +42,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Rebuild :latest from all scratch tags
+      # fast_publish.sh adds only the RPMs :latest is missing and docker-commits
+      # the result, instead of rebuilding all ~8GB of bucket layers from
+      # nginx:alpine. It falls through to sync_repo.sh on ANY doubt, and with
+      # FAST_PUBLISH unset it delegates immediately -- so this step behaves
+      # exactly as before until the variable below is set to 1.
+      - name: Publish :latest from the scratch tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
+          FAST_PUBLISH: ${{ vars.FAST_PUBLISH || '0' }}
         run: |
           df -h /
           git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
-          chmod +x sync_repo.sh
-          ./sync_repo.sh
+          chmod +x fast_publish.sh sync_repo.sh
+          ./fast_publish.sh
