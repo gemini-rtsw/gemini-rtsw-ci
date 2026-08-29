@@ -1,13 +1,19 @@
 name: Publish to rpm-repo:latest
 
 # Single-writer publish step. Called by a repo's CI after the build legs have
-# pushed their per-package scratch tags. Rebuilds the combined yum image
-# (rpm-repo:latest) from the full scratch-tag set.
+# pushed their per-package scratch tags, to bring the combined yum image
+# (rpm-repo:latest) in line with the full scratch-tag set.
+#
+# By default this is INCREMENTAL (fast_publish.sh): pull the current image, add
+# only the RPMs it lacks, merge the metadata, commit, push -- ~8GB of runner
+# disk. The full rebuild (sync_repo.sh) needs ~40GB and fails outright on a 72GB
+# runner, which is a coin flip you cannot opt out of, so it is now the fallback
+# rather than the norm. It still runs for bootstrap, prune, heal and compaction.
 #
 # Caller wires it as a final job:
 #   publish:
 #     needs: build
-#     uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main-el8
+#     uses: gemini-rtsw/gemini-rtsw-ci/.github/workflows/publish.yml@main
 #     secrets: inherit
 
 on:
@@ -15,13 +21,17 @@ on:
     inputs:
       fast_publish:
         description: >-
-          Use the incremental publish path (fast_publish.sh) instead of a full
-          rebuild. Left false, the FAST_PUBLISH org/repo variable decides, and
-          with that unset too the script simply delegates to sync_repo.sh --
-          i.e. exactly the old behaviour. Set true on ONE repo to try it there
-          first; set the variable once it should apply everywhere.
+          Use the incremental publish path (fast_publish.sh): pull :latest, add
+          only the RPMs it lacks, merge the metadata, commit, push. Uses ~8GB of
+          runner disk instead of the ~40GB a full rebuild needs, which is why it
+          is the default -- the old path ENOSPCs whenever the job draws a 72GB
+          runner rather than a 145GB one, and runner size is not selectable
+          (REL-5019). fast_publish.sh falls back to sync_repo.sh on any doubt,
+          so the worst case is the previous behaviour. Pass false to force the
+          full rebuild for one repo; the FAST_PUBLISH org/repo variable still
+          works but is no longer needed to turn this on.
         type: boolean
-        default: false
+        default: true
       publish_tag:
         description: >-
           Which tag to publish. Override to exercise the whole pipeline --
@@ -47,7 +57,7 @@ permissions:
 
 jobs:
   publish:
-    name: Rebuild and push rpm-repo:latest
+    name: Publish rpm-repo:latest
     runs-on: ubuntu-latest
     steps:
       # Aggressively reclaim runner disk (~30-40GB) before pulling tags and
@@ -72,15 +82,24 @@ jobs:
 
       # fast_publish.sh adds only the RPMs :latest is missing and docker-commits
       # the result, instead of rebuilding all ~8GB of bucket layers from
-      # nginx:alpine. It falls through to sync_repo.sh on ANY doubt, and with
-      # FAST_PUBLISH unset it delegates immediately -- so this step behaves
-      # exactly as before until the variable below is set to 1.
+      # nginx:alpine. It falls through to sync_repo.sh on ANY doubt, so the
+      # worst case is the old behaviour.
       - name: Publish from the scratch tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          # Explicit input wins; otherwise the org/repo variable; otherwise off.
-          FAST_PUBLISH: ${{ inputs.fast_publish && '1' || vars.FAST_PUBLISH || '0' }}
+          # The org/repo variable wins if set, then the input (default true).
+          #
+          # That order makes FAST_PUBLISH a fleet-wide KILL SWITCH: set it to 0
+          # at the org and every repo reverts to the full rebuild on its next
+          # publish, no code change or PR. Unset -- the normal state -- and each
+          # repo's input decides, so a repo passing false genuinely opts out
+          # instead of being switched back on by a stray variable.
+          #
+          # A GitHub expression treats any non-empty string as true, so a
+          # variable of "0" is returned as the string "0" and correctly reads as
+          # off; only an unset (empty) variable falls through to the input.
+          FAST_PUBLISH: ${{ vars.FAST_PUBLISH || (inputs.fast_publish && '1' || '0') }}
           PUBLISH_TAG: ${{ inputs.publish_tag }}
         run: |
           df -h /
