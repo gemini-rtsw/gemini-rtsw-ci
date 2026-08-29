@@ -88,5 +88,14 @@ jobs:
             https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
           git log --oneline -1
-          chmod +x fast_publish.sh sync_repo.sh
-          ./fast_publish.sh
+          # Tolerate a gemini-rtsw-repo ref that predates fast_publish.sh, so
+          # this workflow can merge before that script does without breaking
+          # every repo's publish in the gap.
+          chmod +x sync_repo.sh
+          if [ -f fast_publish.sh ]; then
+            chmod +x fast_publish.sh
+            ./fast_publish.sh
+          else
+            echo "fast_publish.sh not present on '${{ inputs.repo_ref }}'; using sync_repo.sh"
+            ./sync_repo.sh
+          fi
