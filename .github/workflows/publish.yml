@@ -12,6 +12,34 @@ name: Publish to rpm-repo:latest
 
 on:
   workflow_call:
+    inputs:
+      fast_publish:
+        description: >-
+          Use the incremental publish path (fast_publish.sh) instead of a full
+          rebuild. Left false, the FAST_PUBLISH org/repo variable decides, and
+          with that unset too the script simply delegates to sync_repo.sh --
+          i.e. exactly the old behaviour. Set true on ONE repo to try it there
+          first; set the variable once it should apply everywhere.
+        type: boolean
+        default: false
+      publish_tag:
+        description: >-
+          Which tag to publish. Override to exercise the whole pipeline --
+          real tag set, real image -- WITHOUT touching :latest. Seed the
+          throwaway tag first (server-side, no data transfer):
+            docker buildx imagetools create \
+              -t ghcr.io/gemini-rtsw/rpm-repo:<tag> \
+              ghcr.io/gemini-rtsw/rpm-repo:latest
+          Otherwise the tag does not exist, the fast path falls back, and the
+          fallback does a full 8GB rebuild -- the thing being avoided.
+        type: string
+        default: latest
+      repo_ref:
+        description: >-
+          Branch of gemini-rtsw-repo to run the publish scripts from. For
+          testing unmerged changes before opening a PR.
+        type: string
+        default: master
 
 permissions:
   contents: read
@@ -47,14 +75,18 @@ jobs:
       # nginx:alpine. It falls through to sync_repo.sh on ANY doubt, and with
       # FAST_PUBLISH unset it delegates immediately -- so this step behaves
       # exactly as before until the variable below is set to 1.
-      - name: Publish :latest from the scratch tags
+      - name: Publish from the scratch tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          FAST_PUBLISH: ${{ vars.FAST_PUBLISH || '0' }}
+          # Explicit input wins; otherwise the org/repo variable; otherwise off.
+          FAST_PUBLISH: ${{ inputs.fast_publish && '1' || vars.FAST_PUBLISH || '0' }}
+          PUBLISH_TAG: ${{ inputs.publish_tag }}
         run: |
           df -h /
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
+          git clone --branch "${{ inputs.repo_ref }}" \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/gemini-rtsw/gemini-rtsw-repo.git
           cd gemini-rtsw-repo
+          git log --oneline -1
           chmod +x fast_publish.sh sync_repo.sh
           ./fast_publish.sh
