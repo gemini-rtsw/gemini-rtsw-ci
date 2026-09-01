@@ -285,6 +285,28 @@ fi &&
             exit 1
         fi &&
 
+        # --- 32-bit (i686) targets ---------------------------------------
+        # rpm takes its build target from the PROCESS PERSONALITY, not from
+        # the spec, so a spec saying BuildArch: i686 dies on an x86_64 host
+        # with "No compatible architectures found for build" -- and rpmspec
+        # and dnf builddep cannot even parse it. setarch i686 makes the
+        # process report itself as i686 and rpm then accepts the target.
+        # BUILD_ARCH below already reads BuildArch and finds RPMS/i686.
+        SETARCH="" &&
+        BUILDDEP_NOBEST="" &&
+        if grep -qE "^BuildArch:[[:space:]]*i686" $SPEC_FILE; then
+            SETARCH="setarch i686" &&
+            BUILDDEP_NOBEST="--nobest" &&
+            echo "32-bit target detected: running rpm tooling under $SETARCH" &&
+            # Under an i686 personality dnf expands $basearch to i386, and
+            # there are no i386 repos -- every URL 404s, including the EPEL
+            # metalink (which carries arch=$basearch). Pin the repo files to
+            # the host arch instead. This does NOT stop i686 packages being
+            # installed: an x86_64 repo carries the i686 ones too, and the
+            # spec selects them by explicit .i686 / (x86-32) names.
+            sed -i "s/\$basearch/x86_64/g" /etc/yum.repos.d/*.repo
+        fi &&
+
         # Show the spec file
         echo "Spec file contents:" &&
         cat $SPEC_FILE &&
@@ -327,7 +349,15 @@ fi &&
         # non-final position of an && list, so an unchecked builddep here used
         # to be swallowed and the build carried on with NO deps installed.
         echo "Installing build dependencies..." &&
-        if ! dnf builddep -y $SPEC_FILE; then
+        # $BUILDDEP_NOBEST is --nobest for 32-bit builds ONLY, and empty
+        # otherwise. A 32-bit build installs pinned legacy i686 packages whose
+        # x86_64 counterparts are excluded from the base repos, and dnf
+        # refuses the whole transaction over the resulting "problem with
+        # installed package" without it. It must NOT apply to normal builds:
+        # it would let dnf settle for an older NVR instead of failing on an
+        # unresolvable pin, which is the opposite of what the check below is
+        # for.
+        if ! $SETARCH dnf builddep -y $BUILDDEP_NOBEST $SPEC_FILE; then
             echo "ERROR: dnf builddep failed -- a BuildRequires could not be resolved." >&2 &&
             echo "       Fix the pin in $SPEC_FILE (or register the missing RPM) and re-run." >&2 &&
             exit 1
@@ -410,6 +440,28 @@ else
 fi &&
         echo "Using original spec file: $SPEC_FILE" &&
 
+        # --- 32-bit (i686) targets ---------------------------------------
+        # rpm takes its build target from the PROCESS PERSONALITY, not from
+        # the spec, so a spec saying BuildArch: i686 dies on an x86_64 host
+        # with "No compatible architectures found for build" -- and rpmspec
+        # and dnf builddep cannot even parse it. setarch i686 makes the
+        # process report itself as i686 and rpm then accepts the target.
+        # BUILD_ARCH below already reads BuildArch and finds RPMS/i686.
+        SETARCH="" &&
+        BUILDDEP_NOBEST="" &&
+        if grep -qE "^BuildArch:[[:space:]]*i686" $SPEC_FILE; then
+            SETARCH="setarch i686" &&
+            BUILDDEP_NOBEST="--nobest" &&
+            echo "32-bit target detected: running rpm tooling under $SETARCH" &&
+            # Under an i686 personality dnf expands $basearch to i386, and
+            # there are no i386 repos -- every URL 404s, including the EPEL
+            # metalink (which carries arch=$basearch). Pin the repo files to
+            # the host arch instead. This does NOT stop i686 packages being
+            # installed: an x86_64 repo carries the i686 ones too, and the
+            # spec selects them by explicit .i686 / (x86-32) names.
+            sed -i "s/\$basearch/x86_64/g" /etc/yum.repos.d/*.repo
+        fi &&
+
         # Get the version directly from the spec file using grep
         PACKAGE_VERSION=$(grep "^%define version" $SPEC_FILE | awk "{print \$3}") &&
         if [ -z "$PACKAGE_VERSION" ]; then
@@ -425,7 +477,7 @@ fi &&
         # of falling back to 1.0 and naming the tarball something the spec
         # cannot find.
         if [ "$PROFILE" = "lightweight" ]; then
-            PACKAGE_VERSION=$(rpmspec -q --queryformat "%{version}\n" $SPEC_FILE | head -1)
+            PACKAGE_VERSION=$($SETARCH rpmspec -q --queryformat "%{version}\n" $SPEC_FILE | head -1)
         fi &&
         echo "Package version: $PACKAGE_VERSION" &&
 
@@ -467,7 +519,7 @@ fi &&
         # the working .git. Override git_branch via --define because under
         # detached HEAD checkouts the spec resolves the branch as nobranch.
         cd /work &&
-        rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps \
+        $SETARCH rpmbuild -ba /root/rpmbuild/SPECS/$(basename $SPEC_FILE) --nodeps \
             --define "git_branch ${GIT_BRANCH:-nobranch}" \
             || exit 1 &&
 
