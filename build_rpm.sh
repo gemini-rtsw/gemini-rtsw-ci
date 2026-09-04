@@ -339,7 +339,17 @@ fi &&
         if [ -f "custom-repo-setup.sh" ]; then
             echo "Found custom repo setup script, running it..." &&
             chmod +x custom-repo-setup.sh &&
-            ./custom-repo-setup.sh
+            # Checked explicitly, for the same reason dnf builddep below is:
+            # this call sits in a non-final position of an && list, where
+            # bash set -e does not apply. Unchecked, a setup script that fails
+            # is swallowed and the build carries on WITHOUT the dependencies
+            # it was supposed to install -- then dies much later on an
+            # unrelated compile error, thousands of lines from the cause.
+            if ! ./custom-repo-setup.sh; then
+                echo "ERROR: custom-repo-setup.sh failed -- build dependencies were not set up." >&2 &&
+                echo "       Fix it and re-run; do not rely on the build failing later." >&2 &&
+                exit 1
+            fi
         fi &&
 
         # Install build dependencies from spec file. Hard-fail if any pinned
