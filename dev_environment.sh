@@ -10,6 +10,27 @@ EL_VERSION="8"
 SKIP_PULL=false
 
 # Parse command line arguments
+usage() {
+  cat <<USAGE
+Usage: $(basename "$0") [options]
+
+Pull this repo's dev image and open a shell in it, with the repo mounted.
+
+Options:
+  --el N              target EL (Rocky) major version: 8 or 9. Default: 8.
+                      A package built only for EL9 needs --el 9 explicitly,
+                      or the image pull fails with "not found".
+  --el=N              same, joined form
+  --no-pull           skip checking the registry for a newer image
+  --skip-pull         same as --no-pull
+  -h, --help          show this help
+
+Examples:
+  $(basename "$0") --el 9
+  $(basename "$0") --el 9 --no-pull
+USAGE
+}
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     -p|--prod)
@@ -20,12 +41,27 @@ while [[ $# -gt 0 ]]; do
       EL_VERSION="$2"
       shift 2
       ;;
+    --el=*)
+      EL_VERSION="${1#*=}"
+      shift
+      ;;
     --no-pull|--skip-pull)
       SKIP_PULL=true
       shift
       ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *)
-      shift
+      # Previously this silently shifted, so a typo like "--el9" was ignored
+      # and the script fell through to the EL8 default -- then failed much
+      # later with an image "not found" that gave no hint the flag was the
+      # cause.
+      echo "ERROR: unknown option '$1'" >&2
+      echo >&2
+      usage >&2
+      exit 1
       ;;
   esac
 done

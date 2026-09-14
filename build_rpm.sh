@@ -46,6 +46,30 @@ SPEC_PATH="${SPEC_PATH:-}"
 # pipeline change without overwriting a repo real :el<N>-latest-devel image.
 DEV_IMAGE_SUFFIX="${DEV_IMAGE_SUFFIX:-}"
 
+usage() {
+    cat <<USAGE
+Usage: $(basename "$0") [options]
+
+Build this repo's RPM(s) into ./rpms and the matching dev image.
+Run from the project repo root, not from inside the submodule.
+
+Options:
+  --el N            target EL (Rocky) major version: 8 or 9. Default: 8.
+                    A package built only for EL9 needs --el 9 explicitly.
+  --el=N            same, joined form
+  --profile NAME    epics (default) or lightweight. lightweight skips
+                    gemini-ade and the rpm-repo dependency container.
+  --profile=NAME    same, joined form
+  --spec PATH       spec file, if it is neither ./*.spec nor SPECS/*.spec
+  --spec=PATH       same, joined form
+  -h, --help        show this help
+
+Examples:
+  $(basename "$0") --el 9
+  $(basename "$0") --profile lightweight --spec packaging/foo.spec
+USAGE
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --el) EL_VERSION="$2"; shift 2 ;;
@@ -55,7 +79,10 @@ while [ "$#" -gt 0 ]; do
         --spec) SPEC_PATH="$2"; shift 2 ;;
         --spec=*) SPEC_PATH="${1#*=}"; shift ;;
         -p|--prod) IS_PROD=true; shift ;;
-        *) shift ;;
+        -h|--help) usage; exit 0 ;;
+        # Previously this silently shifted, so a mistyped flag was ignored and
+        # the build ran with defaults that were not what was asked for.
+        *) echo "ERROR: unknown option '$1'" >&2; echo >&2; usage >&2; exit 1 ;;
     esac
 done
 case "$PROFILE" in
