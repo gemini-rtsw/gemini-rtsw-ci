@@ -191,6 +191,13 @@ fi
 PACKAGE_VERSION=$(grep "^%define version" $SPEC_FILE | awk '{print $3}')
 if [ -z "$PACKAGE_VERSION" ]; then
     PACKAGE_VERSION=$(grep "^Version:" $SPEC_FILE | awk '{print $2}')
+    # The grep reads the spec as text, so a Version built from a macro comes
+    # back unexpanded. rpmspec expands it. Only runs when the value still
+    # contains a macro, so specs with a literal Version are unaffected.
+    if [ -n "$PACKAGE_VERSION" ] && [ "${PACKAGE_VERSION#*%}" != "$PACKAGE_VERSION" ]; then
+        _rv=$(rpmspec -q --queryformat "%{version}\n" "$SPEC_FILE" 2>/dev/null | head -1)
+        [ -n "$_rv" ] && PACKAGE_VERSION=$_rv
+    fi
 fi
 
 # Get git hash for the release
@@ -508,10 +515,20 @@ fi &&
         PACKAGE_VERSION=$(grep "^%define version" $SPEC_FILE | awk "{print \$3}") &&
         if [ -z "$PACKAGE_VERSION" ]; then
             PACKAGE_VERSION=$(grep "^Version:" $SPEC_FILE | awk "{print \$2}") &&
-            # If the version contains macros, try to resolve them
+            # If the version contains macros, resolve them with rpmspec
+            # rather than guessing. The old behaviour substituted "1.0", which
+            # does not fail -- it names the source tarball
+            # <name>-1.0.tar.gz while the spec still expects
+            # <name>-<real version>.tar.gz, so the build dies later with a
+            # confusing "Bad source: ... No such file or directory". 1.0 is
+            # kept only as a last resort if rpmspec cannot parse the spec.
             if [[ "$PACKAGE_VERSION" == *"%{"* ]]; then
-                echo "Version contains macros, using default version 1.0" &&
-                PACKAGE_VERSION="1.0"
+                echo "Version contains macros, resolving with rpmspec" &&
+                PACKAGE_VERSION=$($SETARCH rpmspec -q --queryformat "%{version}\n" $SPEC_FILE 2>/dev/null | head -1) &&
+                if [ -z "$PACKAGE_VERSION" ]; then
+                    echo "rpmspec could not resolve the version; falling back to 1.0" &&
+                    PACKAGE_VERSION="1.0"
+                fi
             fi
         fi &&
         # rpmspec expands macros, so a spec whose Version is defined by a
