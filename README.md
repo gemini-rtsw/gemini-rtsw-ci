@@ -436,6 +436,67 @@ for an EL9-only package always pass `--el 9`, or the dev-image pull fails with
 Run locally, `build_rpm.sh` builds the dev image but does not push it; it prints
 the `docker push` commands if you want it published.
 
+### Building on Apple Silicon (M1/M2/M3/M4 Macs)
+
+**Short version: turn on amd64 emulation once, then everything works normally.**
+
+Everything this pipeline builds is x86_64 — every RPM in rpm-repo, every dev
+image, every machine these packages are deployed to. Docker normally gives you
+containers matching your own Mac, which are arm64, and nothing in the build can
+run there.
+
+The scripts handle this for you: they pass `--platform linux/amd64` on every
+`docker pull` and `docker run`, so you get the same container CI uses. You do
+need your Docker to be able to *run* that container, which takes one setting.
+
+**Check whether it already works:**
+
+```bash
+docker run --rm --platform linux/amd64 rockylinux:9 uname -m
+```
+
+If it prints `x86_64`, you are done — just use the scripts normally.
+If it errors, set up emulation below.
+
+**Docker Desktop**
+
+Settings → General → tick **"Use Rosetta for x86_64/amd64 emulation on Apple
+Silicon"** → Apply & restart. Then run the check again.
+
+**Colima**
+
+Rosetta has to be asked for when the VM is created, so recreate it:
+
+```bash
+colima delete
+colima start --vm-type vz --vz-rosetta --cpu 4 --memory 8 --disk 100
+```
+
+Needs macOS 13 or newer. Flag names have changed between Colima versions — if
+one is rejected, check `colima start --help`. Give it real memory and disk: the
+rpm-repo image alone is about 8 GB.
+
+**What to expect**
+
+Builds run under emulation, so they are several times slower than on CI. That
+is normal and not a sign anything is wrong.
+
+**If something still goes wrong**, the scripts stop immediately with a message
+saying the container is not x86_64, rather than failing later somewhere
+confusing. Re-run the check command above.
+
+**You do not have to build locally at all.** Pushing a branch and letting CI
+build is always an option, and it is the easiest path on a Mac — see
+[WORKFLOW.md](WORKFLOW.md).
+
+**Overriding it.** `GEM_CI_PLATFORM` sets the platform the scripts request.
+Setting it empty uses your own architecture, which is only useful if you are
+deliberately testing something on arm64:
+
+```bash
+GEM_CI_PLATFORM= ./gemini-rtsw-ci/build_rpm.sh --el 9
+```
+
 ### Logging in to GHCR
 
 Pulling the rpm-repo and dev images needs a GitHub [Personal Access Token (classic)](https://github.com/settings/tokens) with the `read:packages` scope:
