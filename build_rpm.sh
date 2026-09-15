@@ -115,6 +115,21 @@ start_rpm_repo() {
     docker network rm "$RPM_REPO_NETWORK" 2>/dev/null || true
 
     docker network create "$RPM_REPO_NETWORK"
+
+    # Pull before running. A CI runner starts with no image cache so it always
+    # fetches the current one, but a local build reuses whatever copy happens
+    # to be on the machine -- which can be weeks old. The symptom is a
+    # dependency that was published minutes ago being invisible:
+    #
+    #   No matching package to install: 'foo = 1.2.3-1.el9'
+    #
+    # which reads as a bad pin rather than a stale image, and re-running does
+    # not help. Best-effort: a registry hiccup must not fail a build that
+    # could have proceeded on the cached image, so failure here is a warning.
+    echo "Pulling ${RPM_REPO_IMAGE}..."
+    docker pull "$RPM_REPO_IMAGE" || \
+        echo "WARNING: could not pull ${RPM_REPO_IMAGE}; using the local copy, which may be stale."
+
     docker run -d --name "$RPM_REPO_CONTAINER" --network "$RPM_REPO_NETWORK" "$RPM_REPO_IMAGE"
 
     # Wait for nginx to be ready
