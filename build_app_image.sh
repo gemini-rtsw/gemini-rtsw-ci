@@ -23,11 +23,20 @@
 set -euo pipefail
 
 DOCKERFILE="Dockerfile"
-# Empty by default: a Dockerfile that needs a specific platform pins it itself
-# with FROM --platform=..., and passing --platform as well breaks the classic
-# builder ("does not provide the specified platform"). Set only when the caller
-# genuinely wants to override the Dockerfile.
+# Defaults to linux/amd64, resolved after the Dockerfile is known (see below).
+# Every host these images are deployed to is x86_64, and docker otherwise builds
+# for whatever the developer is sitting at -- so on an Apple Silicon Mac an
+# unpinned build produces an arm64 image that is pushed to GHCR and then fails
+# to start on the deployed host.
+#
+# NOT applied when the Dockerfile pins its own platform with FROM --platform=...
+# Passing --platform as well breaks the classic builder with "does not provide
+# the specified platform", and the Dockerfile has already said what it wants.
+#
+# --platform <p> overrides; --platform "" forces the host architecture.
 PLATFORM="${APP_IMAGE_PLATFORM:-}"
+PLATFORM_SET=0
+if [ -n "${APP_IMAGE_PLATFORM+x}" ]; then PLATFORM_SET=1; fi
 IMAGE="${APP_IMAGE:-}"
 PUSH=1
 
@@ -37,14 +46,26 @@ while [ "$#" -gt 0 ]; do
         --dockerfile=*) DOCKERFILE="${1#*=}"; shift ;;
         --image) IMAGE="$2"; shift 2 ;;
         --image=*) IMAGE="${1#*=}"; shift ;;
-        --platform) PLATFORM="$2"; shift 2 ;;
-        --platform=*) PLATFORM="${1#*=}"; shift ;;
+        --platform) PLATFORM="$2"; PLATFORM_SET=1; shift 2 ;;
+        --platform=*) PLATFORM="${1#*=}"; PLATFORM_SET=1; shift ;;
         --no-push) PUSH=0; shift ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
 [ -f "$DOCKERFILE" ] || { echo "ERROR: no such Dockerfile: $DOCKERFILE" >&2; exit 1; }
+
+# Resolve the default now that the Dockerfile is known. A Dockerfile that pins
+# its own platform keeps it; anything else is built for x86_64, because that is
+# what every deployment target runs.
+if [ "$PLATFORM_SET" -eq 0 ]; then
+    if grep -qiE "^[[:space:]]*FROM[[:space:]]+--platform=" "$DOCKERFILE"; then
+        PLATFORM=""
+        echo "Dockerfile pins its own platform; not passing --platform."
+    else
+        PLATFORM="linux/amd64"
+    fi
+fi
 
 # Written by build_rpm.sh. Its absence means this ran first, which would defeat
 # the point -- the tag has to be the version the RPM was actually built with.

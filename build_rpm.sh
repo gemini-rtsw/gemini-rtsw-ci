@@ -98,6 +98,26 @@ esac
 BASE_IMAGE="${BUILDER_IMAGE:-rockylinux:${EL_VERSION}}"
 echo "Target: EL${EL_VERSION} (base image ${BASE_IMAGE}, profile ${PROFILE})"
 
+# --- Always build on x86_64 -------------------------------------------------
+# Every RPM in rpm-repo is x86_64 and every dependency a spec pins resolves
+# only there, so an arm64 build cannot work no matter what else is right.
+#
+# Docker pulls whichever architecture matches the host. On an Apple Silicon Mac
+# that is arm64, and the build then fails in ways that point nowhere near the
+# cause: the x86_64 rclone RPM refuses to install, the toolchain install is
+# skipped with it, and the first honest error arrives minutes later as
+# "rpmbuild: command not found". Pinning the platform gives a Mac the same
+# container CI runs, under Rosetta or QEMU.
+#
+# On an x86_64 host (CI runners included) this is a no-op.
+# GEM_CI_PLATFORM= (explicitly empty) uses the host architecture instead.
+PLATFORM="${GEM_CI_PLATFORM-linux/amd64}"
+PLATFORM_ARG=""
+if [ -n "$PLATFORM" ]; then
+    PLATFORM_ARG="--platform $PLATFORM"
+    echo "Build platform: ${PLATFORM}"
+fi
+
 # Pull the per-EL rpm-repo image (~half the size of the combined :latest, so
 # the runner disk doesn't overflow). Overridable via the RPM_REPO_IMAGE env
 # var, so CI/ops can repoint it without another submodule bump. Falls back to
@@ -130,7 +150,8 @@ start_rpm_repo() {
     docker pull "$RPM_REPO_IMAGE" || \
         echo "WARNING: could not pull ${RPM_REPO_IMAGE}; using the local copy, which may be stale."
 
-    docker run -d --name "$RPM_REPO_CONTAINER" --network "$RPM_REPO_NETWORK" "$RPM_REPO_IMAGE"
+    # shellcheck disable=SC2086
+    docker run -d --name "$RPM_REPO_CONTAINER" $PLATFORM_ARG --network "$RPM_REPO_NETWORK" "$RPM_REPO_IMAGE"
 
     # Wait for nginx to be ready
     echo "Waiting for rpm-repo to be ready..."
@@ -245,7 +266,8 @@ fi
 
 # Pull the base image
 echo "Pulling ${BASE_IMAGE} base image..."
-docker pull "$BASE_IMAGE"
+# shellcheck disable=SC2086
+docker pull $PLATFORM_ARG "$BASE_IMAGE"
 
 # Start the rpm-repo container. Only the epics profile installs anything from
 # it, and pulling it is the single most expensive step in the build.
@@ -263,7 +285,7 @@ fi
 # steps and their order are unchanged; only the container lifetime differs.
 # ===========================================================================
 echo "=== Stage 1/3: building the build environment ==="
-docker run --name "$ENV_CONTAINER" -v $(pwd):/work -w /work \
+docker run --name "$ENV_CONTAINER" $PLATFORM_ARG -v $(pwd):/work -w /work \
     $NETWORK_ARGS \
     -e GIT_HASH="$GIT_HASH" \
     -e GIT_BRANCH="$GIT_BRANCH" \
@@ -272,6 +294,19 @@ docker run --name "$ENV_CONTAINER" -v $(pwd):/work -w /work \
     -e SPEC_PATH="$SPEC_PATH" \
     "$BASE_IMAGE" \
     /bin/bash -c 'set -ex && \
+        # Fail in seconds, with a reason, rather than 200 lines later on a
+        # missing rpmbuild. Every RPM in rpm-repo is x86_64, so an arm64
+        # container cannot resolve a single pinned dependency. Reaching here on
+        # an Apple Silicon Mac means amd64 emulation is not available -- see
+        # README, Building on Apple Silicon.
+        if [ "$(uname -m)" != "x86_64" ]; then \
+            echo "ERROR: build container is $(uname -m), but this build needs x86_64." >&2 && \
+            echo "       Every RPM it depends on is x86_64-only, so it cannot continue." >&2 && \
+            echo "       On an Apple Silicon Mac, check that amd64 emulation works:" >&2 && \
+            echo "           docker run --rm --platform linux/amd64 rockylinux:9 uname -m" >&2 && \
+            echo "       That must print x86_64. See README: Building on Apple Silicon." >&2 && \
+            exit 1; \
+        fi && \
         # The lightweight profile installs only what rpmbuild itself needs. No
         # rpm-repo, no EPEL/CRB, no ADE -- see --profile in this script.
         if [ "$PROFILE" = "lightweight" ]; then \
@@ -297,7 +332,18 @@ gpgcheck=0" > /etc/yum.repos.d/rpm-repo.repo && \
 
         # Install rclone (required by gemini-ade; not in EPEL8). The upstream
         # static RPM works on both EL8 and EL9.
-        dnf install -y https://downloads.rclone.org/rclone-current-linux-amd64.rpm && \
+        #
+        # Checked explicitly. Unguarded, this sat in a non-final position of an
+        # && chain, so set -e ignored a failure here: gemini-ade AND the whole
+        # toolchain behind it were skipped, the half-built environment was
+        # committed anyway, and the first honest error was "rpmbuild: command
+        # not found" two stages later.
+        if ! dnf install -y https://downloads.rclone.org/rclone-current-linux-amd64.rpm; then \
+            echo "ERROR: could not install rclone, which gemini-ade requires." >&2 && \
+            echo "       A compatible architecture error here means the container" >&2 && \
+            echo "       is not x86_64 -- see README: Building on Apple Silicon." >&2 && \
+            exit 1; \
+        fi && \
 
         # Install gemini-ade package
         dnf install -y gemini-ade && \
@@ -454,7 +500,7 @@ docker rm -f "$ENV_CONTAINER" >/dev/null
 # half of the original single container run.
 # ===========================================================================
 echo "=== Stage 2/3: building the RPM ==="
-docker run --rm -v $(pwd):/work -w /work \
+docker run --rm $PLATFORM_ARG -v $(pwd):/work -w /work \
     $NETWORK_ARGS \
     -e GIT_HASH="$GIT_HASH" \
     -e GIT_BRANCH="$GIT_BRANCH" \
@@ -610,7 +656,7 @@ ls -l rpms/
 # exception to remember.
 # ===========================================================================
 echo "=== Stage 3/3: dev image ${DEV_TAG} ==="
-docker run --name "$DEV_CONTAINER" -v $(pwd):/work -w /work \
+docker run --name "$DEV_CONTAINER" $PLATFORM_ARG -v $(pwd):/work -w /work \
     $NETWORK_ARGS \
     "$BUILDER_TAG" \
     /bin/bash -c 'set -ex && \

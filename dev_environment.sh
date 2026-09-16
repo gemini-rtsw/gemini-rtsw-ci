@@ -69,6 +69,19 @@ done
 # CI tags images as el<N>-<base> (e.g. el8-latest-devel)
 TAG_SUFFIX="el${EL_VERSION}-${TAG_BASE}"
 
+# --- Always run the x86_64 dev image ----------------------------------------
+# CI publishes dev images for x86_64 only. Docker otherwise pulls whichever
+# architecture matches the host, so on an Apple Silicon Mac this would fail on
+# the pull, or start an arm64 shell where nothing the package needs can run.
+# Pinning the platform gives a Mac the same container CI built, under Rosetta
+# or QEMU; on an x86_64 host it is a no-op.
+# GEM_CI_PLATFORM= (explicitly empty) uses the host architecture instead.
+PLATFORM="${GEM_CI_PLATFORM-linux/amd64}"
+PLATFORM_ARG=""
+if [ -n "$PLATFORM" ]; then
+    PLATFORM_ARG="--platform $PLATFORM"
+fi
+
 # Check if we're in a git repository
 if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     echo "Error: Not in a git repository"
@@ -102,7 +115,7 @@ echo "Using image: ${FULL_IMAGE_PATH}"
 # Check for newer image version
 if [ "$SKIP_PULL" = false ]; then
     echo "Checking for newer image version..."
-    docker pull ${FULL_IMAGE_PATH}
+    docker pull ${PLATFORM_ARG} ${FULL_IMAGE_PATH}
 else
     echo "Skipping image pull (using existing local image)"
 fi
@@ -228,6 +241,7 @@ echo "Starting container with X11 forwarding support..."
 
 # Run the container with all necessary mounts and environment
 docker run -it --rm \
+    ${PLATFORM_ARG} \
     ${DOCKER_ARGS} \
     -v ${GIT_ROOT}:/repo \
     -v ${HOME}/.gitconfig:/root/.gitconfig \
