@@ -46,6 +46,30 @@ SPEC_PATH="${SPEC_PATH:-}"
 # pipeline change without overwriting a repo real :el<N>-latest-devel image.
 DEV_IMAGE_SUFFIX="${DEV_IMAGE_SUFFIX:-}"
 
+usage() {
+    cat <<USAGE
+Usage: $(basename "$0") [options]
+
+Build this repo's RPM(s) into ./rpms and the matching dev image.
+Run from the project repo root, not from inside the submodule.
+
+Options:
+  --el N            target EL (Rocky) major version: 8 or 9. Default: 8.
+                    A package built only for EL9 needs --el 9 explicitly.
+  --el=N            same, joined form
+  --profile NAME    epics (default) or lightweight. lightweight skips
+                    gemini-ade and the rpm-repo dependency container.
+  --profile=NAME    same, joined form
+  --spec PATH       spec file, if it is neither ./*.spec nor SPECS/*.spec
+  --spec=PATH       same, joined form
+  -h, --help        show this help
+
+Examples:
+  $(basename "$0") --el 9
+  $(basename "$0") --profile lightweight --spec packaging/foo.spec
+USAGE
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --el) EL_VERSION="$2"; shift 2 ;;
@@ -55,7 +79,10 @@ while [ "$#" -gt 0 ]; do
         --spec) SPEC_PATH="$2"; shift 2 ;;
         --spec=*) SPEC_PATH="${1#*=}"; shift ;;
         -p|--prod) IS_PROD=true; shift ;;
-        *) shift ;;
+        -h|--help) usage; exit 0 ;;
+        # Previously this silently shifted, so a mistyped flag was ignored and
+        # the build ran with defaults that were not what was asked for.
+        *) echo "ERROR: unknown option '$1'" >&2; echo >&2; usage >&2; exit 1 ;;
     esac
 done
 case "$PROFILE" in
@@ -108,6 +135,21 @@ start_rpm_repo() {
     docker network rm "$RPM_REPO_NETWORK" 2>/dev/null || true
 
     docker network create "$RPM_REPO_NETWORK"
+
+    # Pull before running. A CI runner starts with no image cache so it always
+    # fetches the current one, but a local build reuses whatever copy happens
+    # to be on the machine -- which can be weeks old. The symptom is a
+    # dependency that was published minutes ago being invisible:
+    #
+    #   No matching package to install: 'foo = 1.2.3-1.el9'
+    #
+    # which reads as a bad pin rather than a stale image, and re-running does
+    # not help. Best-effort: a registry hiccup must not fail a build that
+    # could have proceeded on the cached image, so failure here is a warning.
+    echo "Pulling ${RPM_REPO_IMAGE}..."
+    docker pull "$RPM_REPO_IMAGE" || \
+        echo "WARNING: could not pull ${RPM_REPO_IMAGE}; using the local copy, which may be stale."
+
     # shellcheck disable=SC2086
     docker run -d --name "$RPM_REPO_CONTAINER" $PLATFORM_ARG --network "$RPM_REPO_NETWORK" "$RPM_REPO_IMAGE"
 
