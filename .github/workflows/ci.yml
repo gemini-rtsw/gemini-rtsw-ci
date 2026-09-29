@@ -61,6 +61,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # On a pull_request event, checkout defaults to refs/pull/N/merge --
+          # an ephemeral merge commit GitHub synthesises. build_rpm.sh derives
+          # the RPM release from `git rev-parse --short HEAD`, so the package
+          # ends up named after a commit that exists in no branch and cannot be
+          # looked up afterwards. Building the PR's actual head keeps the name
+          # traceable to something you can `git show`.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           fetch-depth: 50
 
@@ -142,6 +149,14 @@ jobs:
           path: rpms/*.rpm
 
       - name: Push RPM scratch tag (no :latest rebuild)
+        # Pull requests build but do not publish. Every PR push otherwise adds
+        # a permanent scratch tag to the shared repository, including from
+        # draft PRs -- and because the release string carries only a commit
+        # hash, rpm orders those builds alphabetically, so an unmerged PR
+        # build can outrank main and win `dnf install`. The RPMs are still
+        # available for testing: the upload-artifact step above attaches them
+        # to the run. Same condition the application-image step already uses.
+        if: github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
