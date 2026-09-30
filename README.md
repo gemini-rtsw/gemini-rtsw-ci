@@ -56,9 +56,33 @@ sequenceDiagram
 
 Every repo needs **two files**: `.github/workflows/ci.yml` and a `.spec`. A repo that ships a container needs **two more**: a `Dockerfile` and a systemd `.service.in`. Templates for all of them are below — copy, rename, done.
 
+### Quickest: copy a template repo
+
+Each type has a minimal repo that already builds green on this pipeline — workflow, spec, submodule and a small working example, so you start from something that passes and change it:
+
+| type | template repo | builds |
+|---|---|---|
+| **A** — EPICS package | [template-epics](https://github.com/gemini-rtsw/template-epics) | one library and one database under `/gem_base/epics/support`, EL8 and EL9 |
+| **B** — non-EPICS package | [template-lightweight](https://github.com/gemini-rtsw/template-lightweight) | one script and one config file, `profile: lightweight`, EL9 |
+| **C** — ships a container | [template-container](https://github.com/gemini-rtsw/template-container) | an image from `Dockerfile`, plus an RPM whose systemd unit pins it |
+
+Create an **empty** repo on GitHub (no README, no license), then:
+
+```bash
+git clone --recurse-submodules https://github.com/gemini-rtsw/template-epics.git <name>
+cd <name>
+git remote set-url origin git@github.com:gemini-rtsw/<name>.git
+```
+
+Rename the template's name to yours and replace the example code — each template's README lists exactly which files and fields — then push. The clone keeps the template's few commits as your starting history, and the submodule comes with it, so skip step 1 below; step 2 still applies.
+
+The rest of this section is what those templates contain, for adding the pipeline to a repo you already have.
+
+### Adding the pipeline to an existing repo
+
 First, the two steps that are the same for every repo:
 
-1. **Add the submodule:**
+1. **Add the submodule** (a template copy already has it):
    ```bash
    git submodule add -b main https://github.com/gemini-rtsw/gemini-rtsw-ci.git gemini-rtsw-ci
    git submodule update --init --recursive
@@ -158,7 +182,7 @@ done
 - Initial packaging.
 ```
 
-Working examples: `slalib` (small), `mcs_mk` (IOC).
+Working examples: [template-epics](https://github.com/gemini-rtsw/template-epics) (minimal), `slalib` (small), `mcs_mk` (IOC).
 </details>
 
 <details>
@@ -223,6 +247,8 @@ install -Dpm 0644 config/<name>.conf %{buildroot}%{_sysconfdir}/<name>.conf
 * Mon Jan 01 2026 You <you@noirlab.edu> - 0.1.0-1
 - Initial packaging.
 ```
+
+Working example: [template-lightweight](https://github.com/gemini-rtsw/template-lightweight) (minimal).
 </details>
 
 <details>
@@ -300,7 +326,7 @@ install -Dpm 0644 deploy/<name>.sysconfig %{buildroot}%{_sysconfdir}/sysconfig/<
 
 **The unit must NOT be `%config(noreplace)`.** It carries the image tag, so an upgrade has to overwrite it — that is how a new release moves the host to a new image. Host-specific settings go in `/etc/sysconfig/<name>`, which *is* `%config(noreplace)` and survives upgrades.
 
-`tsrs_screen` is a complete working example of this pattern.
+[template-container](https://github.com/gemini-rtsw/template-container) is the minimal version of this pattern; `tsrs_screen` is a complete working example.
 </details>
 
 Then push. See [Shipping a container by RPM](#shipping-a-container-by-rpm) for the one host-side requirement: root must be able to pull the image.

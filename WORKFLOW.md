@@ -1,6 +1,6 @@
 # Development workflows
 
-How to work on a package already built by this pipeline. **Creating or migrating a repo** is in [README.md](README.md#start-a-new-repo) — it has cut-and-paste templates for every file you need.
+How to work on a package already built by this pipeline. **Creating or migrating a repo** is in [README.md](README.md#start-a-new-repo) — start a new one by copying a [template repo](README.md#quickest-copy-a-template-repo) (`template-epics`, `template-lightweight`, `template-container`), or use its cut-and-paste templates to add the pipeline to an existing repo.
 
 In a nutshell: **clone → work (in the dev container if you need one) → push → CI builds and publishes the RPM → install it.** `build_rpm.sh` is for local testing and verification; it is never required.
 
