@@ -61,8 +61,47 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # On a pull_request event, checkout defaults to refs/pull/N/merge --
+          # an ephemeral merge commit GitHub synthesises. build_rpm.sh derives
+          # the RPM release from `git rev-parse --short HEAD`, so the package
+          # ends up named after a commit that exists in no branch and cannot be
+          # looked up afterwards. Building the PR's actual head keeps the name
+          # traceable to something you can `git show`.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           fetch-depth: 50
+
+      - name: Use the gemini-rtsw-ci scripts that match this workflow
+        # The workflow itself is always taken from main (callers use
+        # `uses: .../ci.yml@main`), but actions/checkout leaves the
+        # gemini-rtsw-ci submodule at whatever commit the project pinned. So
+        # ci.yml ran against an older build_rpm.sh / build_app_image.sh, and a
+        # workflow change relying on a newer script would break every project
+        # still on an old pin. Move the submodule to main here so the pipeline
+        # changes as one unit.
+        #
+        # A developer's local build still uses the pinned commit, which is the
+        # reproducible fallback if main ever breaks the pipeline. That also
+        # means a published RPM may have been built with DIFFERENT scripts than
+        # the project's pin records -- so both commits are logged below, and a
+        # warning is raised when they differ.
+        run: |
+          d="${{ inputs.scripts_dir }}"
+          # Guard: only if scripts_dir is itself a git checkout (a submodule has
+          # a .git file). Otherwise `git -C` would walk up and operate on the
+          # PROJECT repository instead.
+          if [ ! -e "$d/.git" ]; then
+            echo "::warning::$d is not a git checkout; using the scripts as found"
+            exit 0
+          fi
+          pin=$(git ls-tree HEAD "$d" | awk '{print $3}')
+          git -C "$d" fetch --depth 1 https://github.com/gemini-rtsw/gemini-rtsw-ci.git main
+          git -C "$d" checkout -q --detach FETCH_HEAD
+          used=$(git -C "$d" rev-parse HEAD)
+          echo "gemini-rtsw-ci scripts used: ${used:0:7} (project pin: ${pin:0:7})"
+          if [ "$used" != "$pin" ]; then
+            echo "::warning::gemini-rtsw-ci pin (${pin:0:7}) differs from main (${used:0:7}); a local build of this commit will use different scripts than this run"
+          fi
 
       # Aggressively reclaim runner disk (~30-40GB). The RTEMS cross-compile +
       # pulling the per-EL rpm-repo image fills the default runner '/' and the
@@ -142,6 +181,14 @@ jobs:
           path: rpms/*.rpm
 
       - name: Push RPM scratch tag (no :latest rebuild)
+        # Pull requests build but do not publish. Every PR push otherwise adds
+        # a permanent scratch tag to the shared repository, including from
+        # draft PRs -- and because the release string carries only a commit
+        # hash, rpm orders those builds alphabetically, so an unmerged PR
+        # build can outrank main and win `dnf install`. The RPMs are still
+        # available for testing: the upload-artifact step above attaches them
+        # to the run. Same condition the application-image step already uses.
+        if: github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
