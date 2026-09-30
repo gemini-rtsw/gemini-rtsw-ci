@@ -428,6 +428,7 @@ Prerequisites: Docker running and logged in to GHCR. Run from the **project repo
 ./gemini-rtsw-ci/build_app_image.sh --no-push # Build the runtime image (after build_rpm.sh)
 ./gemini-rtsw-ci/dev_environment.sh           # el8-latest-devel (default)
 ./gemini-rtsw-ci/dev_environment.sh --el 9    # el9-latest-devel
+./gemini-rtsw-ci/dev_environment.sh --el 9 --no-pull  # use the image build_rpm.sh just built
 ```
 
 `build_rpm.sh` and `dev_environment.sh` take `--el <8|9>` and **default to EL8** —
@@ -435,7 +436,10 @@ for an EL9-only package always pass `--el 9`, or the dev-image pull fails with
 `manifest unknown`.
 
 Run locally, `build_rpm.sh` builds the dev image but does not push it; it prints
-the `docker push` commands if you want it published.
+the `docker push` commands if you want it published. It tags that image with the
+same name CI publishes, and `dev_environment.sh` pulls on every start, so the
+next start quietly replaces your local build with `main`'s. Pass `--no-pull` to
+enter the one you just built — see [Pull requests](WORKFLOW.md#pull-requests-what-ci-does).
 
 A local build uses the scripts at your project's **pinned** submodule commit;
 CI uses `main`. To match CI exactly, update the pin:

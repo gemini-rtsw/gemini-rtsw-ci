@@ -215,6 +215,13 @@ Open your PR as a **draft** while you work. Drafts and ready PRs build the same 
 
 **To test the result, download it from the run.** Each run keeps its RPMs as an `rpms-el<N>` artifact — see [Downloading a built RPM](README.md#downloading-a-built-rpm-from-github-actions). Install it on a test host with `dnf install ./<file>.rpm`.
 
+**The dev container still comes from `main`.** Because a PR pushes no dev image, `dev_environment.sh` gives you the one `main` last published — it pulls `:el<N>-latest-devel` on every start. Usually that is what you want: your checkout is mounted at `/repo`, so `make` builds your branch's files whichever image you are in; the image only supplies the toolchain and the installed package. To work in *your branch's* environment instead — to check a change to the spec's `BuildRequires` or `%install`, say — build the image locally and start it without the pull, which would otherwise replace it with `main`'s:
+
+```bash
+./gemini-rtsw-ci/build_rpm.sh --el 9               # tags the dev image locally, under the same name
+./gemini-rtsw-ci/dev_environment.sh --el 9 --no-pull
+```
+
 **Merge to publish.** When the PR merges, the build on `main` publishes the RPM and the dev image.
 
 See [Three levels of development](#three-levels-of-development) for how this compares with a local build and a merge.
