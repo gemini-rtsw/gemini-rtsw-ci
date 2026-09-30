@@ -1,12 +1,12 @@
 # gemini-rtsw-ci
 
-Shared CI scripts for building RPMs and Docker dev environments. Used as a git submodule in each project repo. Every push to `main` builds the package's RPM, publishes it to the shared rpm-repo, and pushes a Docker dev image to GHCR — no flags, no conditions.
+Shared CI scripts for building RPMs and Docker dev environments. Used as a git submodule in each project repo. Every push to `main` builds the package's RPM, publishes it to the shared rpm-repo, and pushes a Docker dev image to GHCR — no flags, no conditions. A pull request runs the same build but publishes nothing; see [Pull requests](WORKFLOW.md#pull-requests-what-ci-does).
 
 For step-by-step guides — EPICS packages, non-EPICS packages, and shipping a container — see [WORKFLOW.md](WORKFLOW.md).
 
 ## How the pipeline works
 
-Each project repo pins this repo as a submodule and calls its reusable workflows. Dependencies and published RPMs both flow through one shared `rpm-repo` image on GHCR; dev images are pushed per project.
+Each project repo calls this repo's reusable workflows, and CI runs this repo's `main` — workflows and scripts both. The submodule is for **local** builds: `./gemini-rtsw-ci/build_rpm.sh` runs the commit your project pinned. When the pin is behind `main`, CI prints a warning saying so. Dependencies and published RPMs both flow through one shared `rpm-repo` image on GHCR; dev images are pushed per project.
 
 ```mermaid
 flowchart LR
@@ -382,9 +382,10 @@ that was never pushed. Use the `$GIT_HASH`-first form:
 ```spec
 %define git_hash %(if [ -n "$GIT_HASH" ]; then echo "$GIT_HASH"; \
                   else git rev-parse --short HEAD 2>/dev/null || echo nogit; fi)
-``` The image is pushed **before** the RPM
-registers, so a published RPM can never pin an image that does not exist. On a
-pull request it is built but not pushed.
+```
+
+The image is pushed **before** the RPM registers, so a published RPM can never
+pin an image that does not exist. On a pull request it is built but not pushed.
 
 **Host requirement — the RPM's unit pulls as root.** A systemd unit runs
 `docker pull` as root, so *root* needs read access to the image, not the
@@ -435,6 +436,14 @@ for an EL9-only package always pass `--el 9`, or the dev-image pull fails with
 
 Run locally, `build_rpm.sh` builds the dev image but does not push it; it prints
 the `docker push` commands if you want it published.
+
+A local build uses the scripts at your project's **pinned** submodule commit;
+CI uses `main`. To match CI exactly, update the pin:
+
+```bash
+git submodule update --remote gemini-rtsw-ci
+git add gemini-rtsw-ci && git commit -m "Update gemini-rtsw-ci"
+```
 
 ### Building on Apple Silicon (M1/M2/M3/M4 Macs)
 
@@ -552,6 +561,12 @@ dnf install <package-name>
 ```bash
 curl -O http://localhost:8080/rpm-repo/<rpm-filename>.rpm
 ```
+
+**Installing a specific build?** Name it in full, e.g.
+`dnf install mypkg-1.0.0-1.gitabc1234.el9`. Plain `dnf install mypkg` picks the
+highest release string, and releases differ only by commit hash, which sorts
+alphabetically — so "highest" is not "newest". Use
+`dnf list --showduplicates mypkg` to see every build.
 
 **To see what's available**, nginx has directory listing on, so browsing `http://localhost:8080/rpm-repo/` (or `curl`-ing it) shows the raw `.rpm` filenames directly.
 

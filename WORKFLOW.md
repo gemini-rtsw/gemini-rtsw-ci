@@ -27,7 +27,8 @@ flowchart TD
   C --> D["4. Edit code"]
   D --> E["5. Edit schematics (TDCT)"]
   E --> F["6. make"]
-  F -->|"good"| G["7. Commit & push -> CI builds and publishes"]
+  F -->|"good"| G["7. Push, open a draft PR -> CI builds"]
+  G --> H["8. Merge -> CI publishes"]
 ```
 
 ### 1. Clone
@@ -87,7 +88,7 @@ make
 
 Much faster than a full RPM build. Not right yet? Back to step 4.
 
-### 7. Commit and push
+### 7. Push and open a draft PR
 
 ```bash
 git add <files>
@@ -95,7 +96,11 @@ git commit -m "<message>"
 git push -u origin <your-branch-name>
 ```
 
-Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh dev image. 
+Then open a **draft** pull request on GitHub. CI builds it on every push — see [Pull requests](#pull-requests-what-ci-does). A pushed branch with no PR is not built.
+
+### 8. Merge
+
+Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh dev image.
 
 ---
 
@@ -121,7 +126,7 @@ git commit -m "<message>"
 git push -u origin <your-branch-name>
 ```
 
-Merging to `main` builds and publishes the RPM.
+Open a draft pull request to have CI build it, then merge to `main` to publish — see [Pull requests](#pull-requests-what-ci-does).
 
 ### 3. Check it before pushing (optional)
 
@@ -184,10 +189,31 @@ The unit pulls on start, so the first restart after an upgrade fetches the new i
 
 ---
 
+## Pull requests: what CI does
+
+Open your PR as a **draft** while you work. Drafts and ready PRs build the same way.
+
+**Every push to the PR runs the full build:** RPM, dev image, and app image if the repo has one. A build that would fail on `main` fails here first.
+
+**Nothing is published.** No RPM goes to rpm-repo, no dev image or app image is pushed, and the other `main` jobs (such as `publish`) are skipped. You can push to a draft as often as you like: it costs build time only and never touches what other people install.
+
+**To test the result, download it from the run.** Each run keeps its RPMs as an `rpms-el<N>` artifact — see [Downloading a built RPM](README.md#downloading-a-built-rpm-from-github-actions). Install it on a test host with `dnf install ./<file>.rpm`.
+
+**Merge to publish.** When the PR merges, the build on `main` publishes the RPM and the dev image.
+
+| | pushed branch, no PR | pull request (draft or ready) | merge to `main` |
+|---|---|---|---|
+| builds | no | **yes** | yes |
+| RPM artifact on the run | — | **yes** | yes |
+| published to rpm-repo | no | **no** | yes |
+| dev / app image pushed | no | **no** | yes |
+
+---
+
 ## Getting a built RPM
 
 Three ways, no local build needed:
 
-- **From rpm-repo** — published automatically; see [README](README.md#browsing-the-rpm-repo-directly).
-- **From the Actions run** — every run uploads `rpms-el<N>` as an artifact; see [README](README.md#downloading-a-built-rpm-from-github-actions).
+- **From rpm-repo** — `main` builds only; see [README](README.md#browsing-the-rpm-repo-directly).
+- **From the Actions run** — every run, PRs included, uploads `rpms-el<N>` as an artifact; see [README](README.md#downloading-a-built-rpm-from-github-actions).
 - **Locally** — `./gemini-rtsw-ci/build_rpm.sh` from the repo root; RPMs land in `rpms/`.
