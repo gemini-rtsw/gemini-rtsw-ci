@@ -4,6 +4,22 @@ How to work on a package already built by this pipeline. **Creating or migrating
 
 In a nutshell: **clone → work (in the dev container if you need one) → push → CI builds and publishes the RPM → install it.** `build_rpm.sh` is for local testing and verification; it is never required.
 
+## Three levels of development
+
+The same build runs at every level. What changes is who runs it and whether the result is published.
+
+| | how | who runs the build | result |
+|---|---|---|---|
+| **1. Local** | `dev_environment.sh`, `make`, `build_rpm.sh` | you, on your machine | RPMs in `rpms/`, dev image in your local Docker |
+| **2. Draft PR** | push to a branch with a draft PR open | CI, on every push | RPMs as an `rpms-el<N>` artifact on the run |
+| **3. Merge to `main`** | merge the PR | CI | the official build: RPM published to rpm-repo, dev image pushed |
+
+**Levels 1 and 2 build the same thing.** A PR build runs `build_rpm.sh` in the same containers you get locally. Locally you run it yourself; on a PR, CI runs it for you on every push. Neither publishes anything, so you can iterate freely at both. The one difference: locally the scripts come from your project's pinned submodule, while CI uses `gemini-rtsw-ci` `main` (see [Local builds](README.md#local-builds)).
+
+**Only level 3 is official.** Nothing reaches rpm-repo or the shared dev image until it is merged.
+
+Use level 1 for fast iteration, level 2 to confirm it builds in CI and to hand an RPM to someone to test, and level 3 to release.
+
 Three workflows, depending on what you are building:
 
 | | your package | start at |
@@ -201,12 +217,7 @@ Open your PR as a **draft** while you work. Drafts and ready PRs build the same 
 
 **Merge to publish.** When the PR merges, the build on `main` publishes the RPM and the dev image.
 
-| | pushed branch, no PR | pull request (draft or ready) | merge to `main` |
-|---|---|---|---|
-| builds | no | **yes** | yes |
-| RPM artifact on the run | — | **yes** | yes |
-| published to rpm-repo | no | **no** | yes |
-| dev / app image pushed | no | **no** | yes |
+See [Three levels of development](#three-levels-of-development) for how this compares with a local build and a merge.
 
 ---
 

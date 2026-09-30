@@ -2,7 +2,7 @@
 
 Shared CI scripts for building RPMs and Docker dev environments. Used as a git submodule in each project repo. Every push to `main` builds the package's RPM, publishes it to the shared rpm-repo, and pushes a Docker dev image to GHCR — no flags, no conditions. A pull request runs the same build but publishes nothing; see [Pull requests](WORKFLOW.md#pull-requests-what-ci-does).
 
-For step-by-step guides — EPICS packages, non-EPICS packages, and shipping a container — see [WORKFLOW.md](WORKFLOW.md).
+For step-by-step guides — EPICS packages, non-EPICS packages, and shipping a container — see [WORKFLOW.md](WORKFLOW.md). It starts with the [three levels of development](WORKFLOW.md#three-levels-of-development): local, draft PR, and merge to `main`.
 
 ## How the pipeline works
 
