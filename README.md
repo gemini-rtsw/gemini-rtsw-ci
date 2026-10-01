@@ -66,15 +66,15 @@ Each type has a minimal repo that already builds green on this pipeline — work
 | **B** — non-EPICS package | [template-lightweight](https://github.com/gemini-rtsw/template-lightweight) | one script and one config file, `profile: lightweight`, EL9 |
 | **C** — ships a container | [template-container](https://github.com/gemini-rtsw/template-container) | an image from `Dockerfile`, plus an RPM whose systemd unit pins it |
 
-They are GitHub template repositories: on the template's page click **Use this template** → **Create a new repository**, then clone yours with `git clone --recurse-submodules`. The copy already has the submodule, so skip step 1 below. Step 2 still applies, and it can only be done once the repo exists, so the build GitHub starts on the copy's first commit fails at the rpm-repo push with `denied: permission_denied: write_package`. That failure is expected and publishes nothing.
+They are GitHub template repositories: on the template's page click **Use this template** → **Create a new repository**. Within a minute, the copy's **Template cleanup** workflow renames everything called `template-<type>` after the new repo and commits it; clone after that, with `git clone --recurse-submodules`. The copy already has the submodule, so skip step 1 below. Step 2 still applies, and it can only be done once the repo exists, so the **Build** run GitHub starts on the copy's first commit fails at the rpm-repo push with `denied: permission_denied: write_package`. That failure is expected and publishes nothing — but **do not re-run it** after granting access: it builds the template as it was before the rename. Push a commit or open a PR instead.
 
-**Rename before you push to `main`.** The names are not tied together the way you might expect:
+Why the rename matters — the names are not tied together the way you might expect:
 
 - **The spec's file name does not matter.** CI builds whatever `./*.spec` it finds.
-- **The spec's `Name:` does.** It is the RPM's name in the shared rpm-repo, so a copy left at `template-epics` publishes a second `template-epics` that competes with the template's own builds.
-- **The repo name decides the image names.** The dev image and, for type C, the app image are pushed as `ghcr.io/<repo>`. template-container's `%global appimage` has to be changed to match, or the unit pins an image that was never pushed — green in CI, broken on the host at `docker pull`.
+- **The spec's `Name:` does.** It is the RPM's name in the shared rpm-repo, so a copy left at `template-epics` would publish a second `template-epics` that competes with the template's own builds.
+- **The repo name decides the image names.** The dev image and, for type C, the app image are pushed as `ghcr.io/<repo>`, lowercased. template-container's `%global appimage` has to match, or the unit pins an image that was never pushed — green in CI, broken on the host at `docker pull`. The cleanup sets it from the repo name, so it does.
 
-Each template's README lists exactly what to rename. Doing it on a branch with a PR is safe, since PR builds publish nothing.
+The RPM may still be named differently from the repo (`hrwfs` for `hrwfs_dm`): change `Name:` afterwards. If the cleanup did not run, each template's README lists what to rename by hand; doing it in a PR is safe, since PR builds publish nothing.
 
 The rest of this section is what those templates contain, for adding the pipeline to a repo you already have.
 
