@@ -1,8 +1,24 @@
 # Development workflows
 
-How to work on a package already built by this pipeline. **Creating or migrating a repo** is in [README.md](README.md#start-a-new-repo) — it has cut-and-paste templates for every file you need.
+How to work on a package already built by this pipeline. **Creating or migrating a repo** is in [README.md](README.md#start-a-new-repo) — start a new one by copying a [template repo](README.md#quickest-copy-a-template-repo) (`template-epics`, `template-lightweight`, `template-container`), or use its cut-and-paste templates to add the pipeline to an existing repo.
 
 In a nutshell: **clone → work (in the dev container if you need one) → push → CI builds and publishes the RPM → install it.** `build_rpm.sh` is for local testing and verification; it is never required.
+
+## Three levels of development
+
+The same build runs at every level. What changes is who runs it and whether the result is published.
+
+| | how | who runs the build | result |
+|---|---|---|---|
+| **1. Local** | `dev_environment.sh`, `make`, `build_rpm.sh` | you, on your machine | RPMs in `rpms/`, dev image in your local Docker |
+| **2. Draft PR** | push to a branch with a draft PR open | CI, on every push | RPMs as an `rpms-el<N>` artifact on the run |
+| **3. Merge to `main`** | merge the PR | CI | the official build: RPM published to rpm-repo, dev image pushed |
+
+**Levels 1 and 2 build the same thing.** A PR build runs `build_rpm.sh` in the same containers you get locally. Locally you run it yourself; on a PR, CI runs it for you on every push. Neither publishes anything, so you can iterate freely at both. The one difference: locally the scripts come from your project's pinned submodule, while CI uses `gemini-rtsw-ci` `main` (see [Local builds](README.md#local-builds)).
+
+**Only level 3 is official.** Nothing reaches rpm-repo or the shared dev image until it is merged.
+
+Use level 1 for fast iteration, level 2 to confirm it builds in CI and to hand an RPM to someone to test, and level 3 to release.
 
 Three workflows, depending on what you are building:
 
@@ -27,7 +43,8 @@ flowchart TD
   C --> D["4. Edit code"]
   D --> E["5. Edit schematics (TDCT)"]
   E --> F["6. make"]
-  F -->|"good"| G["7. Commit & push -> CI builds and publishes"]
+  F -->|"good"| G["7. Push, open a draft PR -> CI builds"]
+  G --> H["8. Merge -> CI publishes"]
 ```
 
 ### 1. Clone
@@ -87,7 +104,7 @@ make
 
 Much faster than a full RPM build. Not right yet? Back to step 4.
 
-### 7. Commit and push
+### 7. Push and open a draft PR
 
 ```bash
 git add <files>
@@ -95,7 +112,11 @@ git commit -m "<message>"
 git push -u origin <your-branch-name>
 ```
 
-Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh dev image. 
+Then open a **draft** pull request on GitHub. CI builds it on every push — see [Pull requests](#pull-requests-what-ci-does). A pushed branch with no PR is not built.
+
+### 8. Merge
+
+Merging to `main` builds the RPM, publishes it to rpm-repo, and pushes a fresh dev image.
 
 ---
 
@@ -121,7 +142,7 @@ git commit -m "<message>"
 git push -u origin <your-branch-name>
 ```
 
-Merging to `main` builds and publishes the RPM.
+Open a draft pull request to have CI build it, then merge to `main` to publish — see [Pull requests](#pull-requests-what-ci-does).
 
 ### 3. Check it before pushing (optional)
 
@@ -184,10 +205,33 @@ The unit pulls on start, so the first restart after an upgrade fetches the new i
 
 ---
 
+## Pull requests: what CI does
+
+Open your PR as a **draft** while you work. Drafts and ready PRs build the same way.
+
+**Every push to the PR runs the full build:** RPM, dev image, and app image if the repo has one. A build that would fail on `main` fails here first.
+
+**Nothing is published.** No RPM goes to rpm-repo, no dev image or app image is pushed, and the other `main` jobs (such as `publish`) are skipped. You can push to a draft as often as you like: it costs build time only and never touches what other people install.
+
+**To test the result, download it from the run.** Each run keeps its RPMs as an `rpms-el<N>` artifact — see [Downloading a built RPM](README.md#downloading-a-built-rpm-from-github-actions). Install it on a test host with `dnf install ./<file>.rpm`.
+
+**The dev container still comes from `main`.** Because a PR pushes no dev image, `dev_environment.sh` gives you the one `main` last published — it pulls `:el<N>-latest-devel` on every start. Usually that is what you want: your checkout is mounted at `/repo`, so `make` builds your branch's files whichever image you are in; the image only supplies the toolchain and the installed package. To work in *your branch's* environment instead — to check a change to the spec's `BuildRequires` or `%install`, say — build the image locally and start it without the pull, which would otherwise replace it with `main`'s:
+
+```bash
+./gemini-rtsw-ci/build_rpm.sh --el 9               # tags the dev image locally, under the same name
+./gemini-rtsw-ci/dev_environment.sh --el 9 --no-pull
+```
+
+**Merge to publish.** When the PR merges, the build on `main` publishes the RPM and the dev image.
+
+See [Three levels of development](#three-levels-of-development) for how this compares with a local build and a merge.
+
+---
+
 ## Getting a built RPM
 
 Three ways, no local build needed:
 
-- **From rpm-repo** — published automatically; see [README](README.md#browsing-the-rpm-repo-directly).
-- **From the Actions run** — every run uploads `rpms-el<N>` as an artifact; see [README](README.md#downloading-a-built-rpm-from-github-actions).
+- **From rpm-repo** — `main` builds only; see [README](README.md#browsing-the-rpm-repo-directly).
+- **From the Actions run** — every run, PRs included, uploads `rpms-el<N>` as an artifact; see [README](README.md#downloading-a-built-rpm-from-github-actions).
 - **Locally** — `./gemini-rtsw-ci/build_rpm.sh` from the repo root; RPMs land in `rpms/`.

@@ -1,12 +1,12 @@
 # gemini-rtsw-ci
 
-Shared CI scripts for building RPMs and Docker dev environments. Used as a git submodule in each project repo. Every push to `main` builds the package's RPM, publishes it to the shared rpm-repo, and pushes a Docker dev image to GHCR — no flags, no conditions.
+Shared CI scripts for building RPMs and Docker dev environments. Used as a git submodule in each project repo. Every push to `main` builds the package's RPM, publishes it to the shared rpm-repo, and pushes a Docker dev image to GHCR — no flags, no conditions. A pull request runs the same build but publishes nothing; see [Pull requests](WORKFLOW.md#pull-requests-what-ci-does).
 
-For step-by-step guides — EPICS packages, non-EPICS packages, and shipping a container — see [WORKFLOW.md](WORKFLOW.md).
+For step-by-step guides — EPICS packages, non-EPICS packages, and shipping a container — see [WORKFLOW.md](WORKFLOW.md). It starts with the [three levels of development](WORKFLOW.md#three-levels-of-development): local, draft PR, and merge to `main`.
 
 ## How the pipeline works
 
-Each project repo pins this repo as a submodule and calls its reusable workflows. Dependencies and published RPMs both flow through one shared `rpm-repo` image on GHCR; dev images are pushed per project.
+Each project repo calls this repo's reusable workflows, and CI runs this repo's `main` — workflows and scripts both. The submodule is for **local** builds: `./gemini-rtsw-ci/build_rpm.sh` runs the commit your project pinned. When the pin is behind `main`, CI prints a warning saying so. Dependencies and published RPMs both flow through one shared `rpm-repo` image on GHCR; dev images are pushed per project.
 
 ```mermaid
 flowchart LR
@@ -56,9 +56,33 @@ sequenceDiagram
 
 Every repo needs **two files**: `.github/workflows/ci.yml` and a `.spec`. A repo that ships a container needs **two more**: a `Dockerfile` and a systemd `.service.in`. Templates for all of them are below — copy, rename, done.
 
+### Quickest: copy a template repo
+
+Each type has a minimal repo that already builds green on this pipeline — workflow, spec, submodule and a small working example, so you start from something that passes and change it:
+
+| type | template repo | builds |
+|---|---|---|
+| **A** — EPICS package | [template-epics](https://github.com/gemini-rtsw/template-epics) | one library and one database under `/gem_base/epics/support`, EL8 and EL9 |
+| **B** — non-EPICS package | [template-lightweight](https://github.com/gemini-rtsw/template-lightweight) | one script and one config file, `profile: lightweight`, EL9 |
+| **C** — ships a container | [template-container](https://github.com/gemini-rtsw/template-container) | an image from `Dockerfile`, plus an RPM whose systemd unit pins it |
+
+They are GitHub template repositories: on the template's page click **Use this template** → **Create a new repository**. Within a minute, the copy's **Template cleanup** workflow renames everything called `template-<type>` after the new repo and commits it; clone after that, with `git clone --recurse-submodules`. The copy already has the submodule, so skip step 1 below. Step 2 still applies, and it can only be done once the repo exists, so the **Build** run GitHub starts on the copy's first commit fails at the rpm-repo push with `denied: permission_denied: write_package`. That failure is expected and publishes nothing — but **do not re-run it** after granting access: it builds the template as it was before the rename. Push a commit or open a PR instead.
+
+Why the rename matters — the names are not tied together the way you might expect:
+
+- **The spec's file name does not matter.** CI builds whatever `./*.spec` it finds.
+- **The spec's `Name:` does.** It is the RPM's name in the shared rpm-repo, so a copy left at `template-epics` would publish a second `template-epics` that competes with the template's own builds.
+- **The repo name decides the image names.** The dev image and, for type C, the app image are pushed as `ghcr.io/<repo>`, lowercased. template-container's `%global appimage` has to match, or the unit pins an image that was never pushed — green in CI, broken on the host at `docker pull`. The cleanup sets it from the repo name, so it does.
+
+The RPM may still be named differently from the repo (`hrwfs` for `hrwfs_dm`): change `Name:` afterwards. If the cleanup did not run, each template's README lists what to rename by hand; doing it in a PR is safe, since PR builds publish nothing.
+
+The rest of this section is what those templates contain, for adding the pipeline to a repo you already have.
+
+### Adding the pipeline to an existing repo
+
 First, the two steps that are the same for every repo:
 
-1. **Add the submodule:**
+1. **Add the submodule** (a template copy already has it):
    ```bash
    git submodule add -b main https://github.com/gemini-rtsw/gemini-rtsw-ci.git gemini-rtsw-ci
    git submodule update --init --recursive
@@ -158,7 +182,7 @@ done
 - Initial packaging.
 ```
 
-Working examples: `slalib` (small), `mcs_mk` (IOC).
+Working examples: [template-epics](https://github.com/gemini-rtsw/template-epics) (minimal), `slalib` (small), `mcs_mk` (IOC).
 </details>
 
 <details>
@@ -223,6 +247,8 @@ install -Dpm 0644 config/<name>.conf %{buildroot}%{_sysconfdir}/<name>.conf
 * Mon Jan 01 2026 You <you@noirlab.edu> - 0.1.0-1
 - Initial packaging.
 ```
+
+Working example: [template-lightweight](https://github.com/gemini-rtsw/template-lightweight) (minimal).
 </details>
 
 <details>
@@ -300,7 +326,7 @@ install -Dpm 0644 deploy/<name>.sysconfig %{buildroot}%{_sysconfdir}/sysconfig/<
 
 **The unit must NOT be `%config(noreplace)`.** It carries the image tag, so an upgrade has to overwrite it — that is how a new release moves the host to a new image. Host-specific settings go in `/etc/sysconfig/<name>`, which *is* `%config(noreplace)` and survives upgrades.
 
-`tsrs_screen` is a complete working example of this pattern.
+[template-container](https://github.com/gemini-rtsw/template-container) is the minimal version of this pattern; `tsrs_screen` is a complete working example.
 </details>
 
 Then push. See [Shipping a container by RPM](#shipping-a-container-by-rpm) for the one host-side requirement: root must be able to pull the image.
@@ -382,9 +408,10 @@ that was never pushed. Use the `$GIT_HASH`-first form:
 ```spec
 %define git_hash %(if [ -n "$GIT_HASH" ]; then echo "$GIT_HASH"; \
                   else git rev-parse --short HEAD 2>/dev/null || echo nogit; fi)
-``` The image is pushed **before** the RPM
-registers, so a published RPM can never pin an image that does not exist. On a
-pull request it is built but not pushed.
+```
+
+The image is pushed **before** the RPM registers, so a published RPM can never
+pin an image that does not exist. On a pull request it is built but not pushed.
 
 **Host requirement — the RPM's unit pulls as root.** A systemd unit runs
 `docker pull` as root, so *root* needs read access to the image, not the
@@ -427,6 +454,7 @@ Prerequisites: Docker running and logged in to GHCR. Run from the **project repo
 ./gemini-rtsw-ci/build_app_image.sh --no-push # Build the runtime image (after build_rpm.sh)
 ./gemini-rtsw-ci/dev_environment.sh           # el8-latest-devel (default)
 ./gemini-rtsw-ci/dev_environment.sh --el 9    # el9-latest-devel
+./gemini-rtsw-ci/dev_environment.sh --el 9 --no-pull  # use the image build_rpm.sh just built
 ```
 
 `build_rpm.sh` and `dev_environment.sh` take `--el <8|9>` and **default to EL8** —
@@ -434,7 +462,18 @@ for an EL9-only package always pass `--el 9`, or the dev-image pull fails with
 `manifest unknown`.
 
 Run locally, `build_rpm.sh` builds the dev image but does not push it; it prints
-the `docker push` commands if you want it published.
+the `docker push` commands if you want it published. It tags that image with the
+same name CI publishes, and `dev_environment.sh` pulls on every start, so the
+next start quietly replaces your local build with `main`'s. Pass `--no-pull` to
+enter the one you just built — see [Pull requests](WORKFLOW.md#pull-requests-what-ci-does).
+
+A local build uses the scripts at your project's **pinned** submodule commit;
+CI uses `main`. To match CI exactly, update the pin:
+
+```bash
+git submodule update --remote gemini-rtsw-ci
+git add gemini-rtsw-ci && git commit -m "Update gemini-rtsw-ci"
+```
 
 ### Building on Apple Silicon (M1/M2/M3/M4 Macs)
 
@@ -552,6 +591,12 @@ dnf install <package-name>
 ```bash
 curl -O http://localhost:8080/rpm-repo/<rpm-filename>.rpm
 ```
+
+**Installing a specific build?** Name it in full, e.g.
+`dnf install mypkg-1.0.0-1.gitabc1234.el9`. Plain `dnf install mypkg` picks the
+highest release string, and releases differ only by commit hash, which sorts
+alphabetically — so "highest" is not "newest". Use
+`dnf list --showduplicates mypkg` to see every build.
 
 **To see what's available**, nginx has directory listing on, so browsing `http://localhost:8080/rpm-repo/` (or `curl`-ing it) shows the raw `.rpm` filenames directly.
 

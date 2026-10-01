@@ -58,6 +58,14 @@ permissions:
 jobs:
   publish:
     name: Publish rpm-repo:latest
+    # Pull requests do not publish (ci.yml skips their scratch-tag push), so
+    # there is nothing of theirs for this job to add -- yet without this it
+    # still ran on every PR, pulling the whole repository and REWRITING
+    # :latest from whatever other projects' tags happened to be pending. A PR
+    # run should not change the served repository. github.event_name here is
+    # the CALLER's event, so this covers every project without touching
+    # their workflows.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       # Aggressively reclaim runner disk (~30-40GB) before pulling tags and
