@@ -254,7 +254,7 @@ Working example: [template-lightweight](https://github.com/gemini-rtsw/template-
 <details>
 <summary><b>C — repo that ships a container</b> — add 2 files to A or B</summary>
 
-The RPM ships a systemd unit; the unit pulls the image. **Nothing is built on the deployed host.** Works with either profile.
+The RPM ships a systemd unit that runs the image; a docker-group user pre-pulls it (the unit falls back to pulling as `software`). **Nothing is built on the deployed host.** Works with either profile.
 
 **1. `ci.yml`** — add one line:
 ```yaml
@@ -280,8 +280,11 @@ TimeoutStartSec=0
 # and a reboot cannot silently change it.
 Environment=IMAGE=@IMAGE@
 
-# Best-effort pull: a registry outage must not stop a working local image.
-ExecStartPre=-/usr/bin/docker pull ${IMAGE}
+# Pull as `software`, never root (root has no GHCR credentials on production
+# hosts), and only when the image is missing: the tag is pinned, so once it is
+# here there is nothing new to fetch. Without `software` (dev), a missing image
+# fails with the exact `docker pull` to run; Restart=always then starts it.
+ExecStartPre=/bin/sh -c 'docker image inspect "$IMAGE" >/dev/null 2>&1 || runuser -u software -- docker pull "$IMAGE" || { echo "Image $IMAGE is not on this host. As a docker-group user run: docker pull $IMAGE" >&2; exit 1; }'
 ExecStartPre=-/usr/bin/docker rm -f <name>
 
 # Foreground `docker run --rm`, deliberately NOT --restart=always: systemd owns
@@ -329,7 +332,7 @@ install -Dpm 0644 deploy/<name>.sysconfig %{buildroot}%{_sysconfdir}/sysconfig/<
 [template-container](https://github.com/gemini-rtsw/template-container) is the minimal version of this pattern; `tsrs_screen` is a complete working example.
 </details>
 
-Then push. See [Shipping a container by RPM](#shipping-a-container-by-rpm) for the one host-side requirement: root must be able to pull the image.
+Then push. See [Shipping a container by RPM](#shipping-a-container-by-rpm) for the one host-side requirement: the image has to get onto the host, pulled by a docker-group user, not by root.
 
 ### Workflow inputs
 
@@ -413,36 +416,35 @@ that was never pushed. Use the `$GIT_HASH`-first form:
 The image is pushed **before** the RPM registers, so a published RPM can never
 pin an image that does not exist. On a pull request it is built but not pushed.
 
-**Host requirement — the RPM's unit pulls as root.** A systemd unit runs
-`docker pull` as root, so *root* needs read access to the image, not the
-installing user. Easiest is to make the package **public** (repo → Packages →
-visibility); then nothing needs a credential and unattended reboots pull
-correctly.
+**Host requirement: getting the image onto the host.** `dnf install` does not
+pull the image, and root on production hosts has no GHCR credentials, so root
+never pulls. Two things cover it:
 
-Otherwise give root the credential once. With sudo rights for docker:
+1. **Pre-pull, as a docker-group user logged in to GHCR**, before
+   `dnf install`, `dnf upgrade` or `dnf downgrade`. Use a PAT (classic) with
+   `read:packages`. The tag is the one in the unit:
+   ```bash
+   grep IMAGE= /usr/lib/systemd/system/<name>.service
+   docker pull ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>     # no sudo
+   ```
+   The docker group shares one daemon and one image store, so an image you
+   pull is the image the unit runs.
+2. **The unit falls back to pulling as `software`.** If the image is missing at
+   start, `ExecStartPre` pulls it with `runuser -u software`. `software` exists
+   on every production host, is in the docker group and is logged in to GHCR.
+   It only pulls when the image is missing, like Podman Quadlet's default
+   `Pull=missing`, so a host whose image is present never contacts the
+   registry.
 
-```bash
-echo "<PAT>" | sudo -H docker login ghcr.io -u <user> --password-stdin
-```
+On a host without `software` (a dev machine), an image that is present starts
+normally. A missing one fails with `Image ... is not on this host. As a
+docker-group user run: docker pull ...` and retries every 5 s, so it starts by
+itself once you pull.
 
-`-H` forces `HOME=/root` so it lands in `/root/.docker/config.json`; without
-it sudo may keep your `HOME`, report success, and the unit still fails.
-
-If sudoers does not allow `docker login` but you are in the `docker` group
-(which is root-equivalent — the daemon runs as root):
-
-```bash
-docker login ghcr.io -u <user> --password-stdin        # no sudo needed
-docker run --rm -v /root:/r -v "$HOME/.docker/config.json":/c:ro alpine \
-  sh -c 'mkdir -p /r/.docker && cp /c /r/.docker/config.json'
-```
-
-Stopgap: `docker pull <image>:<version>` as any docker-group user. Same
-daemon, same image store, so the unit's pull becomes a no-op — but it must be
-repeated on every version bump, so it is not a deployment strategy.
-
-The unit should keep `ExecStartPre=-/usr/bin/docker pull` (leading `-`) so a
-registry outage cannot stop a working local image from starting.
+**Host with no GHCR access at all:** on a machine that has it, run
+`docker save <image> | gzip > image.tar.gz`, copy the file over, then run
+`docker load < image.tar.gz`. Save by the full `ghcr.io/...` name, or the loaded
+tag will not match the unit.
 
 ## Local builds
 

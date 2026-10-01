@@ -162,7 +162,7 @@ RPMs land in `rpms/`. Or open the dev container — the build environment with y
 
 ## Workflow C — repos that ship a container
 
-The repo builds a container image *and* an RPM. The RPM installs a systemd unit; the unit pulls the image and runs it. Nothing is ever built on the deployed host — which is what makes this work on a closed network.
+The repo builds a container image *and* an RPM. The RPM installs a systemd unit; the unit runs the image, which a docker-group user pulls onto the host (the unit falls back to pulling as `software`, never root). Nothing is ever built on the deployed host — which is what makes this work on a closed network.
 
 Add Workflow A or B for the code loop; this is what is different.
 
@@ -189,12 +189,13 @@ Bump the version in the spec and both the RPM and the image move together. `rpm 
 ### 3. Deploy to a host
 
 ```bash
+docker pull ghcr.io/gemini-rtsw/<repo>:<version>-git<hash>   # as yourself (docker group), no sudo
 sudo dnf upgrade <name>
 sudo systemctl restart <service>     # the new image takes effect on restart
 systemctl status <service>
 ```
 
-The unit pulls on start, so the first restart after an upgrade fetches the new image. **Root must be able to pull it** — the unit runs `docker pull` as root, not as you. Simplest is to make the package public; otherwise see [README](README.md#shipping-a-container-by-rpm).
+**`dnf` does not pull the image, and root never does.** Pull it yourself first. If you forget, the unit pulls the missing image as the `software` user on start. Hosts without `software` give you the exact `docker pull` to run. See [Host requirement](README.md#shipping-a-container-by-rpm).
 
 ### 4. Build the image locally (optional)
 
